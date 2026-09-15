@@ -1,0 +1,51 @@
+{
+  "provider": {
+    "name": "openai_compatible",
+    "api_key": "REPLACE_WITH_API_KEY",
+    "model": "REPLACE_WITH_MODEL_NAME",
+    "base_url": "https://api.openai.com/v1",
+    "temperature": 0.8,
+    "max_tokens": 4096,
+    "timeout": 120,
+    "retries": 2,
+    "extra_headers": {},
+    "extra_body": {}
+  },
+  "research": "none",
+  "output": {
+    "outdir": "out"
+  },
+  "defaults": {
+    "language": "English",
+    "tone": "curious, warm, documentary",
+    "style": "story-driven explainer",
+    "audience": "general YouTube audience",
+    "aspect_ratio": "16:9",
+    "image_style": "cinematic realism",
+    "words_per_beat": 12,
+    "chunk_size": 12
+  },
+  "profiles": {
+    "shorts": {
+      "beats": 18,
+      "words_per_beat": 9,
+      "aspect_ratio": "9:16",
+      "pacing": "fast",
+      "hook": "land the hook in the first spoken line"
+    },
+    "documentary": {
+      "duration_minutes": 12,
+      "tone": "measured, authoritative",
+      "depth": "deep",
+      "image_style": "archival documentary photography",
+      "lighting": "natural, high dynamic range"
+    },
+    "mythology": {
+      "genre": "mythology retelling",
+      "tone": "reverent, cinematic",
+      "art_style": "2.5D parallax illustration",
+      "palette": "gold, deep indigo, ember orange",
+      "negative_prompt": "modern clothing, text, logos, watermarks"
+    }
+  }
+}

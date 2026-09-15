@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ytscript"
+version = "1.0.0"
+description = "Modular, provider-agnostic CLI that generates voiceover.md, beat.md and image_prompts.md for faceless YouTube videos."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["youtube", "script", "cli", "llm", "voiceover", "image-prompts"]
+dependencies = []  # stdlib only, on purpose
+
+[project.scripts]
+ytscript = "ytscript.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["ytscript*"]
+
+[tool.ruff]
+line-length = 100
