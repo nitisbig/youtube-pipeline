@@ -1,0 +1,20 @@
+[project]
+name = "beat-gen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Nitesh Ghimire", email = "niteshghimire223@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=3.14.1",
+    "python-dotenv>=1.2.3",
+]
+
+[project.scripts]
+beat-gen = "beat_gen:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
