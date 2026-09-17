@@ -83,6 +83,7 @@ TAG_FIELDS = (
     "reading_level",
     "keywords",
     "avoid",
+    "instructions",
     "aspect_ratio",
     "image_style",
     "art_style",

@@ -28,6 +28,24 @@ def _tag_block(title: str, tags: Dict[str, str]) -> str:
     return f"{title}\n{lines}\n"
 
 
+def _instructions_block(request: ScriptRequest, scope: str = "script") -> str:
+    """Free-form producer notes. Empty string when none were given."""
+    text = (request.instructions or "").strip()
+    if not text:
+        return ""
+    if scope == "images":
+        lead = (
+            "Producer instructions (apply whatever concerns the visuals; "
+            "ignore parts that are only about the narration):"
+        )
+    else:
+        lead = (
+            "Producer instructions (highest priority - follow these even where "
+            "they conflict with the creative tags, but never break the JSON contract):"
+        )
+    return f"\n{lead}\n{text}\n"
+
+
 def _spec(kind: str, count: int, start: int = 1) -> str:
     return f"SPEC: kind={kind} count={count} start={start}"
 
@@ -54,7 +72,7 @@ def outline_prompt(request: ScriptRequest, research_notes: str = "") -> str:
 Plan a {total}-beat voiceover script for a faceless YouTube video.
 A beat is one spoken line of roughly {request.words_per_beat} words.
 
-{_tag_block("Creative tags:", request.narration_tags())}{research}
+{_tag_block("Creative tags:", request.narration_tags())}{_instructions_block(request)}{research}
 {title_rule}
 Break the video into 4-7 sections. The `beats` values must sum to exactly {total}.
 
@@ -108,7 +126,7 @@ def beats_prompt(
 
 Write beats {start} to {end} of a {total}-beat voiceover script.
 
-{outline_block}{_tag_block("Creative tags:", request.narration_tags())}{continuity}{research}
+{outline_block}{_tag_block("Creative tags:", request.narration_tags())}{_instructions_block(request)}{continuity}{research}
 Rules:
 - Exactly {count} beats, indexed {start} to {end}, in order.
 - Each `narration` is ONE spoken line, about {request.words_per_beat} words (never more than double that).
@@ -145,13 +163,14 @@ Write ONE text-to-image prompt for each beat below ({count} prompts, indexes {st
 Beats:
 {listing}
 
-{_tag_block("Art direction tags:", request.visual_tags())}
+{_tag_block("Art direction tags:", request.visual_tags())}{_instructions_block(request, scope="images")}
 Rules for every prompt:
 - Self-sufficient: it must make sense alone, with no memory of other prompts.
   Never write "same as before", "the previous scene", "as above", or "see beat N".
 - Restate the subject, setting, action, lighting, mood and style every time.
 - 30-60 words, one paragraph, comma-separated visual phrases. No line breaks.
 - Describe only what is visible. No narration text, no captions, no watermarks, no letters.
+- Compose for a {request.aspect_ratio} frame.
 - Do NOT include the aspect ratio or any prefix; that is added automatically.
 
 JSON shape:
@@ -170,7 +189,7 @@ def single_beat_prompt(request: ScriptRequest, outline: Outline, index: int) -> 
 
 Write exactly ONE missing beat (index {index}) for the script "{outline.title or request.topic}".
 
-{_tag_block("Creative tags:", request.narration_tags())}
+{_tag_block("Creative tags:", request.narration_tags())}{_instructions_block(request)}
 One spoken line of about {request.words_per_beat} words, plain {request.language}, no labels.
 
 JSON shape:
@@ -187,9 +206,9 @@ Write exactly ONE self-sufficient text-to-image prompt for this beat.
 beat{beat.index}: {beat.narration}
 visual: {beat.visual_hint}
 
-{_tag_block("Art direction tags:", request.visual_tags())}
+{_tag_block("Art direction tags:", request.visual_tags())}{_instructions_block(request, scope="images")}
 30-60 words, one paragraph, only visible detail, no text in the image,
-no aspect ratio and no prefix.
+composed for a {request.aspect_ratio} frame, no aspect ratio and no prefix.
 
 JSON shape:
 {{"prompts": [{{"index": {beat.index}, "prompt": "..."}}]}}

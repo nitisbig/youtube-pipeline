@@ -57,6 +57,9 @@ class ScriptRequest:
     reading_level: str = "clear, conversational, grade 8"
     keywords: List[str] = field(default_factory=list)
     avoid: List[str] = field(default_factory=list)
+    # Free-form producer notes (beat count, structure, narrator voice, facts
+    # to include ...). Injected verbatim into every prompt, above the tags.
+    instructions: Optional[str] = None
 
     # --- visual tags ------------------------------------------------------- #
     aspect_ratio: str = "16:9"
