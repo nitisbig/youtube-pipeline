@@ -90,12 +90,14 @@ def build_subtitle_cmd(ctx, settings):
 def build_beat_cmd(ctx, settings):
     project_dir = ctx["project_dir"]
     slug = ctx["slug"]
+
     cmd = [
-        settings.get("python_bin", "python3"), "beatalign.py",
+        "uv", "run", "python", "beatalign.py",
         "--beatsource", f"{project_dir}/beat.md",
         "--srtsource", f"{project_dir}/{slug}.srt",
         "--out", f"{project_dir}/beat.json",
     ]
+
     return cmd, _job_dir("beat", settings), False
 
 
