@@ -119,6 +119,7 @@ ALIASES = {
     "--keyword": "keywords",
     "-x": "avoid",
     "--avoid": "avoid",
+    "--instructions-file": "instructions",
 }
 
 
