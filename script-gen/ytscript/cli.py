@@ -346,6 +346,15 @@ def build_request(
             continue  # keep the profile / settings value
         values[field_name] = value
 
+    instructions_file = getattr(args, "instructions_file", None)
+    if instructions_file:
+        path = Path(instructions_file).expanduser()
+        if not path.is_file():
+            raise UsageError(f"--instructions-file not found: {path}")
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            values["instructions"] = text
+
     extra: Dict[str, str] = dict(values.pop("extra", {}) or {})
     extra.update(dict(getattr(args, "tag", None) or []))
     image_extra: Dict[str, str] = dict(values.pop("image_extra", {}) or {})
