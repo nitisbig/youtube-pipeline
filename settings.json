@@ -1,0 +1,33 @@
+{
+  "pipeline_root": "/home/kingnit/Desktop/youtube pipline",
+  "python_bin": "python3",
+  "uv_bin": "uv",
+  "defaults": {
+    "duration": 3,
+    "tone": "story, sad",
+    "depth": "deep",
+    "art_style": "2.5D parallax illustration",
+    "palette": "ochre and slate",
+    "keywords": [
+      "aqueduct",
+      "legion"
+    ],
+    "avoid": "clickbait",
+    "reference_id": "bf322df2096a46f18c579d0baa36f41d",
+    "animation": "fadein",
+    "image_source": "/home/kingnit/Downloads/bulk"
+  },
+  "job_dirs": {
+    "script": "script-gen",
+    "audio": "audio-gen",
+    "image": "image-gen",
+    "subtitle": "subtitle-gen/whisper.cpp",
+    "beat": "beat-gen",
+    "editor": "editor",
+    "audio_add": "editor"
+  },
+  "whisper": {
+    "model": "models/ggml-tiny.en.bin",
+    "cli_path": "./build/bin/whisper-cli"
+  }
+}
