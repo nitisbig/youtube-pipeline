@@ -441,6 +441,7 @@ def cmd_generate(args: argparse.Namespace, argv: Sequence[str]) -> int:
             "pipeline": Pipeline.default().names(),
             "narration_tags": request.narration_tags(),
             "visual_tags": request.visual_tags(),
+            "instructions": request.instructions or None,
         }
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         return 0
