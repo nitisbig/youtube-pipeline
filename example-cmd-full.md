@@ -14,7 +14,7 @@ uv run autoimg.py --source "/home/kingnit/Desktop/youtube pipline/out/dog-story/
 tmp=$(mktemp --suffix=.wav) && ffmpeg -loglevel error -y   -i "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/audio.mp3"   -ar 16000 -ac 1 -c:a pcm_s16le "$tmp" && ./build/bin/whisper-cli   -m models/ggml-tiny.en.bin   -f "$tmp"   -osrt   -of "/home/kingnit/Desktop/youtube pipline/out/dog-story" ; rm -f "$tmp"
 
 ### Beat Aligner
-python3 beatalign.py \
+uv run beatalign.py \
   --beatsource "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/beat.md" \
   --srtsource "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/dog-story.srt" \
   --out "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/beat.json"
