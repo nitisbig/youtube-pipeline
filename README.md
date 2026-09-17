@@ -1,51 +1,44 @@
 # YouTube Video-Gen Pipeline Orchestrator
 
-A single Tkinter GUI that drives your 7 existing workers (script → audio →
-images → subtitles → beat-align → edit → add-audio) end to end, with
-resumable progress, manual per-step retriggering, and a pause point after
-image generation (since that worker hands off to a browser extension and
-exits immediately).
+A single Tkinter GUI that drives the 7 workers (script → audio → images →
+subtitles → beat-align → edit → add-audio) end to end, with resumable
+progress, automatic retries, per-step pre-flight checks, manual per-step
+re-runs and a pause point after image generation (that worker hands off to a
+browser extension and exits immediately).
 
-It does **not** reimplement any of your workers — it only shells out to
-the exact CLI commands you already run by hand, in the same folders, with
-the same flags.
+It does **not** reimplement the workers - it shells out to the same CLI
+commands you run by hand, in the same folders.
 
-## 1. Where this goes
-
-Drop these files into the root of your existing pipeline, next to your
-worker folders:
+## 1. Layout
 
 ```
 youtube-pipeline/
-├── main.py                 <- new
-├── settings.json            <- created automatically on first run
-├── orchestrator/            <- new
-│   ├── __init__.py
-│   ├── config.py
-│   ├── jobs.py
-│   ├── state.py
-│   ├── pipeline.py
-│   └── gui.py
-├── script-gen/               <- your existing worker
-├── audio-gen/                <- your existing worker
-├── image-gen/                <- your existing worker
-├── subtitle-gen/whisper.cpp/ <- your existing worker
-├── beat-gen/                 <- your existing worker
-├── editor/                   <- your existing worker (editor.py + add_audio.py)
-└── out/                      <- created automatically, one folder per project
+├── main.py
+├── settings.json             <- created automatically on first run
+├── orchestrator/
+│   ├── config.py             settings.json shape + defaults
+│   ├── jobs.py               the 7 steps, their commands and pre-flight checks
+│   ├── state.py              resumable per-project state
+│   ├── pipeline.py           execution engine (threads, retries, stop/resume)
+│   └── gui.py                Tkinter front-end
+├── script-gen/               ytscript (voiceover.md, beat.md, image_prompts.md)
+├── audio-gen/                tts.py (Fish Audio)
+├── image-gen/                autoimg.py (ChatGPT bulk image extension)
+├── subtitle-gen/whisper.cpp/ whisper-cli
+├── beat-gen/                 beatalign.py (LLM alignment -> beat.json)
+├── editor/                   editor.py (animated render) + add_audio.py
+└── out/                      one folder per project
 ```
 
 ## 2. Requirements
 
-- Python 3.9+
-- Tkinter (`python3 -m tkinter` should open a blank window). On Debian/Ubuntu,
-  if it's missing: `sudo apt install python3-tk`
-- Everything your 7 workers already need (`uv`, `ffmpeg`, `whisper.cpp`
-  built at `subtitle-gen/whisper.cpp/build/bin/whisper-cli`, etc.) — the
-  orchestrator assumes those already work when you run them by hand.
+- Python 3.9+ with Tkinter (`python3 -m tkinter` should open a window;
+  Debian/Ubuntu: `sudo apt install python3-tk`)
+- Everything the workers need: `uv`, `ffmpeg` (+ `ffprobe`), whisper.cpp built
+  at `subtitle-gen/whisper.cpp/build/bin/whisper-cli`, API keys in the
+  workers' `.env` files.
 
-No extra pip packages are required for the orchestrator itself — it's
-standard library only (`tkinter`, `subprocess`, `threading`, `json`).
+The orchestrator itself is standard library only.
 
 ## 3. Run it
 
@@ -54,106 +47,91 @@ cd youtube-pipeline
 python3 main.py
 ```
 
-On first run this creates `settings.json` next to `main.py`, pre-filled
-with the defaults from your example commands (tone, depth, palette,
-keywords, avoid, reference-id, animation, image source, whisper model
-path, and the sub-folder each worker runs from). `pipeline_root` is
-auto-detected as the folder `main.py` lives in.
-
-Open it any time with the **"Edit settings.json"** button in the GUI, or
-in a text editor. Nothing needs to be recompiled — it's read fresh each
-time you create a project.
+On first run this creates `settings.json` next to `main.py`. When a newer
+version adds settings, the missing keys are filled in automatically without
+touching your values. Open it any time with **Edit settings.json**.
 
 ## 4. Workflow
 
-1. **Title / Duration / Art style** — the 3 fields exposed in the GUI.
-   Everything else (tone, depth, palette, keywords, avoid, reference-id,
-   animation, image source) comes from `settings.json`'s `"defaults"`
-   block and gets snapshotted into the project the moment you create it,
-   so later edits to `settings.json` won't retroactively change a
-   project that's already in progress.
-2. **Output folder name** auto-fills as a slug of the title (editable) —
-   this becomes `out/<slug>/`, matching `-o` in your script-gen command.
-3. Click **Create / Load Project**. If a project with that folder name
-   already exists, it's loaded (its saved progress is *not* reset).
-4. Click **START**. The pipeline runs steps 1→7 in order:
-   1. Script Generator
-   2. Audio Generator
-   3. Image Generator
-   4. Subtitle Generator
-   5. Beat Aligner
-   6. Video Editor
-   7. Audio Adder
-5. **After step 3 (Image Generator) it always pauses automatically.**
-   That worker opens Brave, triggers the download extension, and exits
-   immediately — long before the images actually exist. Verify the
-   images finished downloading, then click **RESUME** to continue with
-   subtitles → beat-align → edit → add-audio.
-6. If a step fails (non-zero exit code), the pipeline halts there too.
-   Fix whatever's wrong (in that worker's own folder/config) and click
-   **RESUME** — it restarts from the first step that hasn't succeeded,
-   it does not re-run steps already marked done.
+The project panel has three tabs. Everything you see in them is written into
+the project **right before every run**, so you can change e.g. the animation
+and just click *Run* on step 6 again.
 
-### STOP / RESUME / QUIT
+**Project** - Title, output folder (auto-slug, editable), duration, optional
+exact beat count, **aspect ratio** (`16:9`, `9:16`, `1:1`, `4:5`) and art
+style. The aspect ratio is passed to the script generator (image prompt
+prefix) and to the editor (frame size), so one setting targets YouTube,
+Shorts/Reels/TikTok or square feeds.
 
-- **STOP** kills the currently-running worker (its whole process group,
-  not just the top-level shell — matters for the subtitle step, which
-  is a `mktemp && ffmpeg && whisper-cli` chain) and halts the sequence.
-- **RESUME** restarts the sequence from the first step that isn't marked
-  successful yet — whether that's because you stopped it, a step
-  failed, or you closed the app after the auto-pause and reopened it
-  later. Progress is stored on disk, not in memory, so this works even
-  across app restarts: pick the project from **Existing projects** →
-  **Load Selected**, then **RESUME**.
-- **QUIT** stops any running worker (asks first) and closes the app.
+**Script & Voice** - a free-form **custom instructions** box for the script
+writer (structure, beat pacing, narrator persona, facts to include, things to
+avoid ...). The text is saved as `custom_instructions.md` in the project and
+injected into every ytscript prompt with higher priority than the tags. Plus
+tone, depth and the Fish Audio voice reference ID.
 
-### Manual per-step "Run" buttons
+**Video & Animation** - animation preset, transition, smoothness (easing),
+fit (`cover` crops, `contain` letterboxes), fps, zoom strength, the image
+folder (Browse...) and an optional *per-project subfolder* mode that tells
+the browser extension to download into `<Downloads>/<folder name>/` so
+projects never share images.
 
-Each of the 7 rows has its own **Run** button. Use it to re-run a single
-worker in isolation — e.g. you tweaked something in `editor/editor.py`
-and just want to redo step 6 without touching the others, or you want to
-regenerate subtitles after re-recording audio. It uses the same project
-context (same `out/<slug>/` paths) as the automated run. You can't use a
-manual Run while the automated sequence is running — Stop it first.
+Animation presets (`editor.py --list-animations`):
 
-## 5. Where everything is tracked
+| preset | effect |
+|---|---|
+| `none`, `fadein`, `fade` | static image, optional fade in / in+out |
+| `zoom_in`, `zoom_out` | slow push in / pull back |
+| `ken_burns` | push in towards a random edge or corner |
+| `drift` | gentle 2.5D float: light zoom with a soft drift |
+| `pan_left/right/up/down` | camera pan across the image |
+| `slide_left/right/up/down` | image slides into place |
+| `random` | a different preset for every scene (never the same twice in a row) |
 
-Every project (`out/<slug>/`) gets two files the orchestrator manages
-for you:
+A scene can override the global preset with an `"animation"` key in its
+`beat.json` entry.
 
-- `.pipeline_state.json` — status of each of the 7 steps
-  (`pending` / `running` / `success` / `failed` / `stopped`), the
-  parameters the project was created with, and whether it's paused
-  awaiting manual verification. This is what makes Resume work after
-  closing the app.
-- `pipeline.log` — every line of stdout/stderr from every worker run for
-  that project, in order, so you have a full history without needing
-  the GUI open.
+Then:
 
-## 6. Customizing / extending
+1. **Create / Load Project**. Existing projects are loaded (progress kept)
+   and their saved settings appear in the GUI.
+2. **START** runs steps 1 → 7. Each step is pre-checked first (missing
+   `voiceover.md`, no images yet, whisper not built ...) and fails with a
+   clear message instead of a worker traceback. Failed steps are retried
+   automatically (`settings.retries`, default: script 1x, audio 2x, beat 2x).
+3. **After step 3 the pipeline pauses.** Wait for the downloads, then
+   **RESUME**. The editor pre-check compares image ids with beat ids and
+   warns about missing or extra images before rendering.
+4. **STOP** kills the current worker (whole process group). **RESUME**
+   continues from the first step that isn't done, also after restarting
+   the app. **Run** re-runs one step; **Reset** marks it pending again.
+5. **Open project folder** / **Open final video** open `out/<slug>/`.
 
-Everything is in `orchestrator/`:
+## 5. What is tracked
 
-- **`jobs.py`** — the 7 steps and exactly how each CLI command is built.
-  If a worker's flags change, or you add an 8th step, this is the only
-  file that needs new command-building logic (plus one entry in the
-  `JOBS` list — order in that list is execution order).
-- **`config.py`** — the shape of `settings.json` and its first-run
-  defaults.
-- **`pipeline.py`** — the execution engine (threading, subprocess
-  handling, stop/resume/pause logic). Shouldn't need to change unless
-  you want different pause/retry behavior.
-- **`state.py`** — the resumable per-project state file.
-- **`gui.py`** — the Tkinter front-end. Pure presentation; all the real
-  logic lives in `pipeline.py`.
+Every project gets `.pipeline_state.json` (step status, parameters, pause
+flag; written atomically, corrupted files are backed up), `pipeline.log`
+(everything every worker printed) and `custom_instructions.md`.
 
-## 7. One assumption worth double-checking
+## 6. Worker CLI additions
 
-The subtitle step calls `whisper-cli ... -osrt -of "<project_dir>/<slug>"`,
-so the `.srt` is expected at `<project_dir>/<slug>.srt`, and the Beat
-Aligner step is wired to read from that same path. Your two example
-commands used slightly different folder/file names for this
-(`dog-story` vs `dog-sad-story`), so if your build of whisper.cpp names
-the output file differently, adjust `build_subtitle_cmd` and
-`build_beat_cmd` in `orchestrator/jobs.py` (both are short, ~10 lines
-each) to match.
+- `ytscript ... --instructions "..."` / `--instructions-file notes.md`
+- `editor.py --animation random --transition fade --smoothness ease_in_out --aspect 9:16 --fit cover --zoom 0.18 --seed 42`
+  (`--dry-run` prints the ffmpeg command and filter graph)
+- `beatalign.py --retries 2` re-asks the model with the validation error;
+  if it keeps failing a proportional alignment is used (`--no-fallback`
+  to abort instead). Output is a continuous timeline starting at 0.
+- `add_audio.py --extend-video` holds the last frame until the narration ends.
+- `tts.py --retries 3 --speed 0.95`
+
+## 7. Customizing / extending
+
+- **`jobs.py`** - how each command is built and pre-checked; add an 8th step
+  by adding a builder and one entry to `JOBS`.
+- **`config.py`** - the shape of `settings.json` and its defaults.
+- **`pipeline.py`** - execution engine (threading, retries, stop/resume).
+- **`state.py`** - resumable per-project state.
+- **`gui.py`** - Tkinter front-end; presets are read from `jobs.py`.
+
+The subtitle step writes `<project_dir>/<slug>.srt` and the beat aligner
+reads the same path; adjust `build_subtitle_cmd` / `build_beat_cmd` if your
+whisper.cpp build names its output differently.
