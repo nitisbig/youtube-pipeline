@@ -233,6 +233,11 @@ def _add_generate(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
                      help="word or claim to avoid (repeatable)")
     nar.add_argument("--tag", action="append", type=_kv, metavar="KEY=VALUE",
                      help="any custom narration tag (repeatable)")
+    nar.add_argument("--instructions", metavar="TEXT",
+                     help="free-form producer notes for the writer: beat structure, narrator voice, "
+                          "facts to include, things to avoid ... (added verbatim to every prompt)")
+    nar.add_argument("--instructions-file", metavar="PATH",
+                     help="read --instructions from a text/markdown file")
 
     img = p.add_argument_group("image / art direction tags")
     img.add_argument("-r", "--aspect-ratio", help="aspect ratio used in the prompt prefix (16:9)")
