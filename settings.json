@@ -15,7 +15,16 @@
     "avoid": "clickbait",
     "reference_id": "bf322df2096a46f18c579d0baa36f41d",
     "animation": "fadein",
-    "image_source": "/home/kingnit/Downloads/bulk"
+    "image_source": "/home/kingnit/Downloads/bulk",
+    "beats": "",
+    "custom_instructions": "",
+    "aspect_ratio": "16:9",
+    "transition": "fade",
+    "smoothness": "ease_in_out",
+    "fit": "cover",
+    "fps": 30,
+    "zoom": 0.18,
+    "image_subfolder": false
   },
   "job_dirs": {
     "script": "script-gen",
@@ -29,5 +38,18 @@
   "whisper": {
     "model": "models/ggml-tiny.en.bin",
     "cli_path": "./build/bin/whisper-cli"
-  }
+  },
+  "image_gen": {
+    "downloads_dir": "/home/kingnit/Downloads"
+  },
+  "retries": {
+    "script": 1,
+    "audio": 2,
+    "image": 0,
+    "subtitle": 0,
+    "beat": 2,
+    "editor": 0,
+    "audio_add": 0
+  },
+  "retry_delay_seconds": 5
 }
