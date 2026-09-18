@@ -1,1 +1,8 @@
 out/
+__pycache__/
+*.pyc
+.env
+*.filter.txt
+*.part
+settings.json.tmp
+settings.json.broken-*

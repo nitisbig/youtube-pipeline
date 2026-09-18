@@ -83,6 +83,7 @@ TAG_FIELDS = (
     "reading_level",
     "keywords",
     "avoid",
+    "instructions",
     "aspect_ratio",
     "image_style",
     "art_style",
@@ -118,6 +119,7 @@ ALIASES = {
     "--keyword": "keywords",
     "-x": "avoid",
     "--avoid": "avoid",
+    "--instructions-file": "instructions",
 }
 
 
@@ -231,6 +233,11 @@ def _add_generate(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
                      help="word or claim to avoid (repeatable)")
     nar.add_argument("--tag", action="append", type=_kv, metavar="KEY=VALUE",
                      help="any custom narration tag (repeatable)")
+    nar.add_argument("--instructions", metavar="TEXT",
+                     help="free-form producer notes for the writer: beat structure, narrator voice, "
+                          "facts to include, things to avoid ... (added verbatim to every prompt)")
+    nar.add_argument("--instructions-file", metavar="PATH",
+                     help="read --instructions from a text/markdown file")
 
     img = p.add_argument_group("image / art direction tags")
     img.add_argument("-r", "--aspect-ratio", help="aspect ratio used in the prompt prefix (16:9)")
@@ -339,6 +346,15 @@ def build_request(
             continue  # keep the profile / settings value
         values[field_name] = value
 
+    instructions_file = getattr(args, "instructions_file", None)
+    if instructions_file:
+        path = Path(instructions_file).expanduser()
+        if not path.is_file():
+            raise UsageError(f"--instructions-file not found: {path}")
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            values["instructions"] = text
+
     extra: Dict[str, str] = dict(values.pop("extra", {}) or {})
     extra.update(dict(getattr(args, "tag", None) or []))
     image_extra: Dict[str, str] = dict(values.pop("image_extra", {}) or {})
@@ -425,6 +441,7 @@ def cmd_generate(args: argparse.Namespace, argv: Sequence[str]) -> int:
             "pipeline": Pipeline.default().names(),
             "narration_tags": request.narration_tags(),
             "visual_tags": request.visual_tags(),
+            "instructions": request.instructions or None,
         }
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         return 0

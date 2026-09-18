@@ -7,6 +7,11 @@ python3 -m ytscript -t "The Dog Who Waited at the Wrong House" -g \
 ### Audio Generator
 python3 tts.py --path '/home/kingnit/Desktop/youtube pipline/out/dog-story/voiceover.md' --reference-id bf322df2096a46f18c579d0baa36f41d --out "/home/kingnit/Desktop/youtube pipline/out/dog-story/audio.mp3"
 
+### Audio Enhancer
+uv run enhancer.py "/home/kingnit/Desktop/youtube pipline/out/dog-story/audio.mp3" \
+  --output "/home/kingnit/Desktop/youtube pipline/out/dog-story/enhanced_audio.mp3" \
+  --preset youtube
+
 ### Image Generator
 uv run autoimg.py --source "/home/kingnit/Desktop/youtube pipline/out/dog-story/image_prompts.md"
 

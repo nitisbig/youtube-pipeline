@@ -155,6 +155,47 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(twice.lower().count("create image"), 1)
 
 
+class InstructionTests(unittest.TestCase):
+    def test_instructions_reach_every_prompt(self):
+        from ytscript.models import Beat, Outline
+        from ytscript.prompts import (
+            beats_prompt,
+            image_prompts_prompt,
+            outline_prompt,
+            single_beat_prompt,
+            single_image_prompt,
+        )
+
+        note = "Open with a question. Narrator: calm older woman."
+        request = ScriptRequest(topic="t", beats=3, instructions=note)
+        beat = Beat(index=1, narration="x", visual_hint="y")
+        self.assertIn(note, outline_prompt(request))
+        self.assertIn(note, beats_prompt(request, Outline(), 1, 3))
+        self.assertIn(note, single_beat_prompt(request, Outline(), 2))
+        self.assertIn(note, image_prompts_prompt(request, [beat]))
+        self.assertIn(note, single_image_prompt(request, beat))
+
+    def test_no_instructions_leaves_prompts_clean(self):
+        from ytscript.prompts import outline_prompt
+
+        self.assertNotIn("Producer instructions", outline_prompt(ScriptRequest(topic="t", beats=3)))
+
+    def test_instructions_file_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = Path(tmp) / "notes.md"
+            notes.write_text("Use exactly five beats.\n", encoding="utf-8")
+            outdir = Path(tmp) / "out"
+            code = main(
+                ["-t", "T", "-g", "-p", "mock", "-b", "5", "--chunk-size", "5",
+                 "--instructions-file", str(notes), "-o", str(outdir), "-q"]
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(sorted(p.name for p in outdir.iterdir()), ["beat.md", "image_prompts.md", "voiceover.md"])
+
+    def test_missing_instructions_file_is_usage_error(self):
+        self.assertEqual(main(["-t", "T", "-g", "-p", "mock", "--instructions-file", "/nonexistent/notes.md", "-q"]), 64)
+
+
 class ConfigTests(unittest.TestCase):
     def test_dotenv_parsing(self):
         values = parse_dotenv('# c\nexport A=1\nB="two"\n\nBAD\n')
