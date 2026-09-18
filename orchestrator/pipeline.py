@@ -1,5 +1,5 @@
 """
-The engine that actually runs the 7 workers.
+The engine that actually runs the 8 workers.
 
 Design:
 - One background thread runs the sequence of steps so the Tkinter

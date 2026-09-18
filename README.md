@@ -1,10 +1,10 @@
 # YouTube Video-Gen Pipeline Orchestrator
 
-A single Tkinter GUI that drives the 7 workers (script → audio → images →
-subtitles → beat-align → edit → add-audio) end to end, with resumable
-progress, automatic retries, per-step pre-flight checks, manual per-step
-re-runs and a pause point after image generation (that worker hands off to a
-browser extension and exits immediately).
+A single Tkinter GUI that drives the 8 workers (script → audio → enhance →
+images → subtitles → beat-align → edit → add-audio) end to end, with
+resumable progress, automatic retries, per-step pre-flight checks, manual
+per-step re-runs and a pause point after image generation (that worker hands
+off to a browser extension and exits immediately).
 
 It does **not** reimplement the workers - it shells out to the same CLI
 commands you run by hand, in the same folders.
@@ -17,12 +17,12 @@ youtube-pipeline/
 ├── settings.json             <- created automatically on first run
 ├── orchestrator/
 │   ├── config.py             settings.json shape + defaults
-│   ├── jobs.py               the 7 steps, their commands and pre-flight checks
+│   ├── jobs.py               the 8 steps, their commands and pre-flight checks
 │   ├── state.py              resumable per-project state
 │   ├── pipeline.py           execution engine (threads, retries, stop/resume)
 │   └── gui.py                Tkinter front-end
 ├── script-gen/               ytscript (voiceover.md, beat.md, image_prompts.md)
-├── audio-gen/                tts.py (Fish Audio)
+├── audio-gen/                tts.py (Fish Audio) + enhancer.py (ffmpeg voice polish)
 ├── image-gen/                autoimg.py (ChatGPT bulk image extension)
 ├── subtitle-gen/whisper.cpp/ whisper-cli
 ├── beat-gen/                 beatalign.py (LLM alignment -> beat.json)
@@ -67,7 +67,8 @@ Shorts/Reels/TikTok or square feeds.
 writer (structure, beat pacing, narrator persona, facts to include, things to
 avoid ...). The text is saved as `custom_instructions.md` in the project and
 injected into every ytscript prompt with higher priority than the tags. Plus
-tone, depth and the Fish Audio voice reference ID.
+tone, depth, the Fish Audio voice reference ID and the **enhancer preset**
+(`youtube`, `clean`, `strong`) used to polish the generated narration.
 
 **Video & Animation** - animation preset, transition, smoothness (easing),
 fit (`cover` crops, `contain` letterboxes), fps, zoom strength, the image
@@ -94,11 +95,12 @@ Then:
 
 1. **Create / Load Project**. Existing projects are loaded (progress kept)
    and their saved settings appear in the GUI.
-2. **START** runs steps 1 → 7. Each step is pre-checked first (missing
+2. **START** runs steps 1 → 8. Each step is pre-checked first (missing
    `voiceover.md`, no images yet, whisper not built ...) and fails with a
    clear message instead of a worker traceback. Failed steps are retried
-   automatically (`settings.retries`, default: script 1x, audio 2x, beat 2x).
-3. **After step 3 the pipeline pauses.** Wait for the downloads, then
+   automatically (`settings.retries`, default: script 1x, audio 2x,
+   enhance 1x, beat 2x).
+3. **After step 4 the pipeline pauses.** Wait for the downloads, then
    **RESUME**. The editor pre-check compares image ids with beat ids and
    warns about missing or extra images before rendering.
 4. **STOP** kills the current worker (whole process group). **RESUME**
@@ -122,10 +124,12 @@ flag; written atomically, corrupted files are backed up), `pipeline.log`
   to abort instead). Output is a continuous timeline starting at 0.
 - `add_audio.py --extend-video` holds the last frame until the narration ends.
 - `tts.py --retries 3 --speed 0.95`
+- `enhancer.py in.mp3 --output out.mp3 --preset youtube --target-lufs -16
+  --true-peak -1.5 --lra 7 --no-deesser` (`--list-presets` prints the presets)
 
 ## 7. Customizing / extending
 
-- **`jobs.py`** - how each command is built and pre-checked; add an 8th step
+- **`jobs.py`** - how each command is built and pre-checked; add a 9th step
   by adding a builder and one entry to `JOBS`.
 - **`config.py`** - the shape of `settings.json` and its defaults.
 - **`pipeline.py`** - execution engine (threading, retries, stop/resume).
@@ -135,3 +139,29 @@ flag; written atomically, corrupted files are backed up), `pipeline.log`
 The subtitle step writes `<project_dir>/<slug>.srt` and the beat aligner
 reads the same path; adjust `build_subtitle_cmd` / `build_beat_cmd` if your
 whisper.cpp build names its output differently.
+
+## 8. Narration audio
+
+Step 2 writes `audio.mp3` (the raw TTS take) and step 3 polishes it into
+`enhanced_audio.mp3` with `audio-gen/enhancer.py`: high-pass, voice EQ,
+compression, de-esser and two-pass EBU R128 loudness normalisation, all
+through ffmpeg (no model download, no network).
+
+Everything after step 3 - the subtitle transcription and the final mux - uses
+`enhanced_audio.mp3`, so the viewer hears the polished narration and the
+subtitles match it. `audio.mp3` is kept untouched, so step 3 can be re-run
+with a different preset (`Run` on it) without paying for the TTS call again.
+
+| preset | effect |
+|---|---|
+| `youtube` | clear, warm, loud documentary narration (default) |
+| `clean` | gentler processing for already-clean AI speech |
+| `strong` | more controlled, denser narration |
+
+`uv run enhancer.py --list-presets` in `audio-gen/` lists them; the script
+also takes `--target-lufs`, `--true-peak`, `--lra` and `--no-deesser` if you
+run it by hand.
+
+⚠️ Projects made before step 3 existed resume at the enhancer once you open
+them: `next_incomplete_index()` starts from the first step that isn't done, so
+subtitle → audio-add re-run against the enhanced audio automatically.

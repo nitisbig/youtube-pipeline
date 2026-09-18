@@ -1,5 +1,5 @@
 """
-Defines the 7 pipeline steps and how to build the exact CLI command for
+Defines the 8 pipeline steps and how to build the exact CLI command for
 each one, given a project context (ctx) and the loaded settings.
 
 Each builder returns a 3-tuple:
@@ -29,6 +29,8 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 
 ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:5"]
+# Keep in sync with PRESETS in audio-gen/enhancer.py.
+AUDIO_PRESETS = ["youtube", "clean", "strong"]
 ANIMATIONS = [
     "random",
     "none", "fadein", "fade",
@@ -101,6 +103,7 @@ def project_paths(ctx):
         "image_prompts": project_dir / "image_prompts.md",
         "instructions": project_dir / INSTRUCTIONS_FILENAME,
         "audio": project_dir / "audio.mp3",
+        "enhanced_audio": project_dir / "enhanced_audio.mp3",
         "srt_prefix": project_dir / slug,
         "srt": project_dir / f"{slug}.srt",
         "beat_json": project_dir / "beat.json",
@@ -230,7 +233,37 @@ def precheck_audio(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 3. image
+# 3. audio enhancer
+# --------------------------------------------------------------------------- #
+
+
+def build_enhance_cmd(ctx, settings):
+    """
+    ffmpeg-based voice cleanup (EQ, compression, de-esser, EBU R128
+    loudness normalisation) of the raw TTS output.
+
+    Reads audio.mp3 and writes enhanced_audio.mp3 - the raw take is kept
+    so this step can be re-run (with a different preset, say) without
+    re-calling the TTS API. Everything downstream (subtitle, audio_add)
+    uses the enhanced file.
+    """
+    paths = project_paths(ctx)
+    cmd = [
+        _uv(settings), "run", "enhancer.py",
+        str(paths["audio"]),
+        "--output", str(paths["enhanced_audio"]),
+        "--preset", _pick(ctx.get("audio_preset"), AUDIO_PRESETS, "youtube"),
+    ]
+    return cmd, _job_dir("enhance", settings), False
+
+
+def precheck_enhance(ctx, settings):
+    paths = project_paths(ctx)
+    return _missing_files([("audio.mp3", paths["audio"])]), []
+
+
+# --------------------------------------------------------------------------- #
+# 4. image
 # --------------------------------------------------------------------------- #
 
 
@@ -251,15 +284,18 @@ def precheck_image(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 4. subtitle
+# 5. subtitle
 # --------------------------------------------------------------------------- #
 
 
 def build_subtitle_cmd(ctx, settings):
     """
     Mirrors the manual one-liner:
-        tmp=$(mktemp --suffix=.wav) && ffmpeg ... -i audio.mp3 ... "$tmp" \\
+        tmp=$(mktemp --suffix=.wav) && ffmpeg ... -i enhanced_audio.mp3 ... "$tmp" \\
           && ./build/bin/whisper-cli -m <model> -f "$tmp" -osrt -of <prefix>
+
+    Transcribes the *enhanced* narration (that is what the video ends up
+    carrying, so the subtitles match what the viewer hears).
 
     -of is given "<project_dir>/<slug>" so whisper.cpp writes
     "<project_dir>/<slug>.srt". The exit status of the ffmpeg/whisper chain
@@ -274,7 +310,7 @@ def build_subtitle_cmd(ctx, settings):
     q = shlex.quote
     shell_cmd = (
         'tmp=$(mktemp --suffix=.wav) && '
-        f'ffmpeg -hide_banner -loglevel error -y -i {q(str(paths["audio"]))} '
+        f'ffmpeg -hide_banner -loglevel error -y -i {q(str(paths["enhanced_audio"]))} '
         '-ar 16000 -ac 1 -c:a pcm_s16le "$tmp" && '
         f'{q(whisper_cli)} -m {q(model)} -f "$tmp" -osrt -of {q(str(paths["srt_prefix"]))} ; '
         'status=$? ; rm -f "$tmp" ; exit $status'
@@ -284,7 +320,7 @@ def build_subtitle_cmd(ctx, settings):
 
 def precheck_subtitle(ctx, settings):
     paths = project_paths(ctx)
-    errors = _missing_files([("audio.mp3", paths["audio"])])
+    errors = _missing_files([("enhanced_audio.mp3", paths["enhanced_audio"])])
     root = Path(settings.get("pipeline_root", "."))
     job_dir = root / _job_dir("subtitle", settings)
     whisper = settings.get("whisper", {})
@@ -298,7 +334,7 @@ def precheck_subtitle(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 5. beat aligner
+# 6. beat aligner
 # --------------------------------------------------------------------------- #
 
 
@@ -319,7 +355,7 @@ def precheck_beat(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 6. editor
+# 7. editor
 # --------------------------------------------------------------------------- #
 
 
@@ -385,7 +421,7 @@ def precheck_editor(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 7. audio adder
+# 8. audio adder
 # --------------------------------------------------------------------------- #
 
 
@@ -394,7 +430,7 @@ def build_audio_add_cmd(ctx, settings):
     cmd = [
         _python(settings), "add_audio.py",
         "--video", str(paths["video"]),
-        "--audio", str(paths["audio"]),
+        "--audio", str(paths["enhanced_audio"]),
         "--out", str(paths["final"]),
         "--extend-video",
     ]
@@ -403,7 +439,9 @@ def build_audio_add_cmd(ctx, settings):
 
 def precheck_audio_add(ctx, settings):
     paths = project_paths(ctx)
-    return _missing_files([("rendered video", paths["video"]), ("audio.mp3", paths["audio"])]), []
+    return _missing_files(
+        [("rendered video", paths["video"]), ("enhanced_audio.mp3", paths["enhanced_audio"])]
+    ), []
 
 
 # --------------------------------------------------------------------------- #
@@ -427,8 +465,15 @@ JOBS = [
         "auto_pause_after": False,
     },
     {
+        "id": "enhance",
+        "label": "3. Audio Enhancer",
+        "builder": build_enhance_cmd,
+        "precheck": precheck_enhance,
+        "auto_pause_after": False,
+    },
+    {
         "id": "image",
-        "label": "3. Image Generator",
+        "label": "4. Image Generator",
         "builder": build_image_cmd,
         "precheck": precheck_image,
         "auto_pause_after": True,
@@ -441,28 +486,28 @@ JOBS = [
     },
     {
         "id": "subtitle",
-        "label": "4. Subtitle Generator",
+        "label": "5. Subtitle Generator",
         "builder": build_subtitle_cmd,
         "precheck": precheck_subtitle,
         "auto_pause_after": False,
     },
     {
         "id": "beat",
-        "label": "5. Beat Aligner",
+        "label": "6. Beat Aligner",
         "builder": build_beat_cmd,
         "precheck": precheck_beat,
         "auto_pause_after": False,
     },
     {
         "id": "editor",
-        "label": "6. Video Editor",
+        "label": "7. Video Editor",
         "builder": build_editor_cmd,
         "precheck": precheck_editor,
         "auto_pause_after": False,
     },
     {
         "id": "audio_add",
-        "label": "7. Audio Adder",
+        "label": "8. Audio Adder",
         "builder": build_audio_add_cmd,
         "precheck": precheck_audio_add,
         "auto_pause_after": False,

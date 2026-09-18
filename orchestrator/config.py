@@ -46,6 +46,7 @@ DEFAULT_SETTINGS = {
         "avoid": "clickbait",
         "custom_instructions": "",
         "reference_id": "bf322df2096a46f18c579d0baa36f41d",
+        "audio_preset": "youtube",
         "aspect_ratio": "16:9",
         "animation": "random",
         "transition": "fade",
@@ -61,6 +62,7 @@ DEFAULT_SETTINGS = {
     "job_dirs": {
         "script": "script-gen",
         "audio": "audio-gen",
+        "enhance": "audio-gen",
         "image": "image-gen",
         "subtitle": "subtitle-gen/whisper.cpp",
         "beat": "beat-gen",
@@ -87,6 +89,7 @@ DEFAULT_SETTINGS = {
     "retries": {
         "script": 1,
         "audio": 2,
+        "enhance": 1,
         "image": 0,
         "subtitle": 0,
         "beat": 2,

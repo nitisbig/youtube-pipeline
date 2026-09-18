@@ -14,6 +14,7 @@
     ],
     "avoid": "clickbait",
     "reference_id": "bf322df2096a46f18c579d0baa36f41d",
+    "audio_preset": "youtube",
     "animation": "fadein",
     "image_source": "/home/kingnit/Downloads/bulk",
     "beats": "",
@@ -29,6 +30,7 @@
   "job_dirs": {
     "script": "script-gen",
     "audio": "audio-gen",
+    "enhance": "audio-gen",
     "image": "image-gen",
     "subtitle": "subtitle-gen/whisper.cpp",
     "beat": "beat-gen",
@@ -45,6 +47,7 @@
   "retries": {
     "script": 1,
     "audio": 2,
+    "enhance": 1,
     "image": 0,
     "subtitle": 0,
     "beat": 2,

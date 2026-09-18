@@ -305,6 +305,12 @@ class App(tk.Tk):
         grid.columnconfigure(1, weight=1)
         grid.columnconfigure(5, weight=1)
 
+        ttk.Label(grid, text="Narration polish (enhancer preset)").grid(row=1, column=4, sticky="w", pady=(6, 0))
+        self.audio_preset_var = tk.StringVar()
+        ttk.Combobox(
+            grid, textvariable=self.audio_preset_var, values=job_defs.AUDIO_PRESETS, state="readonly", width=12
+        ).grid(row=1, column=5, sticky="w", padx=(4, 0), pady=(6, 0))
+
     def _build_tab_video(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="Video & Animation")
@@ -441,6 +447,7 @@ class App(tk.Tk):
             "tone": self.tone_var.get().strip(),
             "depth": self.depth_var.get(),
             "reference_id": self.reference_var.get().strip(),
+            "audio_preset": self.audio_preset_var.get() or "youtube",
             "animation": self.animation_var.get() or "none",
             "transition": self.transition_var.get() or "none",
             "smoothness": self.smoothness_var.get() or "ease_in_out",
@@ -470,6 +477,7 @@ class App(tk.Tk):
         self.tone_var.set(str(params.get("tone", "") or ""))
         self.depth_var.set(pick("depth", job_defs.DEPTHS, "balanced"))
         self.reference_var.set(str(params.get("reference_id", "") or ""))
+        self.audio_preset_var.set(pick("audio_preset", job_defs.AUDIO_PRESETS, "youtube"))
 
         self.animation_var.set(pick("animation", job_defs.ANIMATIONS, "none"))
         self.transition_var.set(pick("transition", job_defs.TRANSITIONS, "none"))
@@ -607,7 +615,7 @@ class App(tk.Tk):
             return
         final = self.engine.final_video_path()
         if final is None or not final.exists():
-            messagebox.showinfo("Not yet", "final.mp4 doesn't exist yet - run the pipeline through step 7 first.")
+            messagebox.showinfo("Not yet", f"final.mp4 doesn't exist yet - run the pipeline through step {len(job_defs.JOBS)} first.")
             return
         if not open_path(final):
             messagebox.showinfo("Final video", str(final))
