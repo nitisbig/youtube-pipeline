@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=YouTube Video Pipeline
+GenericName=Video Generator & Orchestrator
+Comment=AI-powered YouTube video generation pipeline
+Exec="/home/kingnit/Desktop/youtube pipline/launch.sh"
+Icon=/home/kingnit/Desktop/youtube pipline/assets/icon.png
+Path=/home/kingnit/Desktop/youtube pipline
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=youtube;video;pipeline;orchestrator;subtitles;ai;

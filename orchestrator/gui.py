@@ -179,6 +179,15 @@ class App(tk.Tk):
         self.geometry("1240x820")
         self.minsize(1020, 660)
 
+        # Set window icon if available
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "icon.png"
+        if icon_path.is_file():
+            try:
+                self._app_icon = tk.PhotoImage(file=str(icon_path))
+                self.iconphoto(True, self._app_icon)
+            except Exception:
+                pass
+
         self._setup_styles()
 
         self.config_mgr = Config()
