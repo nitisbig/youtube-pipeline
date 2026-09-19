@@ -1,7 +1,7 @@
 # YouTube Video-Gen Pipeline Orchestrator
 
-A single Tkinter GUI that drives the 8 workers (script → audio → enhance →
-images → subtitles → beat-align → edit → add-audio) end to end, with
+A single Tkinter GUI that drives the 9 workers (script → audio → enhance →
+images → subtitles → beat-align → edit → add-audio → subtitle-worker) end to end, with
 resumable progress, automatic retries, per-step pre-flight checks, manual
 per-step re-runs and a pause point after image generation (that worker hands
 off to a browser extension and exits immediately).
@@ -17,14 +17,14 @@ youtube-pipeline/
 ├── settings.json             <- created automatically on first run
 ├── orchestrator/
 │   ├── config.py             settings.json shape + defaults
-│   ├── jobs.py               the 8 steps, their commands and pre-flight checks
+│   ├── jobs.py               the 9 steps, their commands and pre-flight checks
 │   ├── state.py              resumable per-project state
 │   ├── pipeline.py           execution engine (threads, retries, stop/resume)
 │   └── gui.py                Tkinter front-end
 ├── script-gen/               ytscript (voiceover.md, beat.md, image_prompts.md)
 ├── audio-gen/                tts.py (Fish Audio) + enhancer.py (ffmpeg voice polish)
 ├── image-gen/                autoimg.py (ChatGPT bulk image extension)
-├── subtitle-gen/whisper.cpp/ whisper-cli
+├── subtitle-gen/             subtitle_worker.py (styled & animated subtitles) + whisper.cpp/
 ├── beat-gen/                 beatalign.py (LLM alignment -> beat.json)
 ├── editor/                   editor.py (animated render) + add_audio.py
 └── out/                      one folder per project
@@ -95,7 +95,7 @@ Then:
 
 1. **Create / Load Project**. Existing projects are loaded (progress kept)
    and their saved settings appear in the GUI.
-2. **START** runs steps 1 → 8. Each step is pre-checked first (missing
+2. **START** runs steps 1 → 9. Each step is pre-checked first (missing
    `voiceover.md`, no images yet, whisper not built ...) and fails with a
    clear message instead of a worker traceback. Failed steps are retried
    automatically (`settings.retries`, default: script 1x, audio 2x,
@@ -126,10 +126,12 @@ flag; written atomically, corrupted files are backed up), `pipeline.log`
 - `tts.py --retries 3 --speed 0.95`
 - `enhancer.py in.mp3 --output out.mp3 --preset youtube --target-lufs -16
   --true-peak -1.5 --lra 7 --no-deesser` (`--list-presets` prints the presets)
+- `subtitle_worker.py --video final.mp4 --srt sub.srt --out final_subtitled.mp4 --style hormozi --animation pop --max-words 3`
+  (`--list-styles` lists presets: hormozi, karaoke, modern, neon, cinematic, boxed, comic)
 
 ## 7. Customizing / extending
 
-- **`jobs.py`** - how each command is built and pre-checked; add a 9th step
+- **`jobs.py`** - how each command is built and pre-checked; add a step
   by adding a builder and one entry to `JOBS`.
 - **`config.py`** - the shape of `settings.json` and its defaults.
 - **`pipeline.py`** - execution engine (threading, retries, stop/resume).

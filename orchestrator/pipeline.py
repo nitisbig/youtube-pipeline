@@ -163,7 +163,10 @@ class PipelineEngine:
     def final_video_path(self):
         if self.state is None:
             return None
-        return job_defs.project_paths(self.ctx)["final"]
+        paths = job_defs.project_paths(self.ctx)
+        if paths["subtitled"].exists():
+            return paths["subtitled"]
+        return paths["final"]
 
     @staticmethod
     def list_projects(pipeline_root):

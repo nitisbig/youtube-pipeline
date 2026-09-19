@@ -25,7 +25,15 @@
     "fit": "cover",
     "fps": 30,
     "zoom": 0.18,
-    "image_subfolder": false
+    "image_subfolder": false,
+    "subtitle_style": "hormozi",
+    "subtitle_animation": "pop",
+    "subtitle_position": "bottom",
+    "subtitle_max_words": 3,
+    "subtitle_uppercase": false,
+    "subtitle_font": "",
+    "subtitle_font_size": 0,
+    "use_gpu": false
   },
   "job_dirs": {
     "script": "script-gen",
@@ -35,7 +43,8 @@
     "subtitle": "subtitle-gen/whisper.cpp",
     "beat": "beat-gen",
     "editor": "editor",
-    "audio_add": "editor"
+    "audio_add": "editor",
+    "subtitle_burn": "subtitle-gen"
   },
   "whisper": {
     "model": "models/ggml-tiny.en.bin",
@@ -52,7 +61,8 @@
     "subtitle": 0,
     "beat": 2,
     "editor": 0,
-    "audio_add": 0
+    "audio_add": 0,
+    "subtitle_burn": 0
   },
   "retry_delay_seconds": 5
 }

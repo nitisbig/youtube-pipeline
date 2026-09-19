@@ -56,6 +56,14 @@ DEFAULT_SETTINGS = {
         "zoom": 0.18,
         "image_source": str(Path.home() / "Downloads" / "bulk"),
         "image_subfolder": False,
+        "subtitle_style": "hormozi",
+        "subtitle_animation": "pop",
+        "subtitle_position": "bottom",
+        "subtitle_max_words": 3,
+        "subtitle_uppercase": False,
+        "subtitle_font": "",
+        "subtitle_font_size": 0,
+        "use_gpu": False,
     },
 
     # Sub-folder (relative to pipeline_root) each worker is run from.
@@ -68,6 +76,7 @@ DEFAULT_SETTINGS = {
         "beat": "beat-gen",
         "editor": "editor",
         "audio_add": "editor",
+        "subtitle_burn": "subtitle-gen",
     },
 
     # whisper.cpp specifics used by the subtitle job.
@@ -95,6 +104,7 @@ DEFAULT_SETTINGS = {
         "beat": 2,
         "editor": 0,
         "audio_add": 0,
+        "subtitle_burn": 0,
     },
     "retry_delay_seconds": 5,
 }

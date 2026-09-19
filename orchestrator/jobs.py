@@ -43,6 +43,29 @@ SMOOTHNESS = ["linear", "ease_in", "ease_out", "ease_in_out"]
 FIT_MODES = ["cover", "contain"]
 DEPTHS = ["light", "balanced", "deep"]
 
+# Keep in sync with subtitle-gen/subtitle_worker.py.
+SUBTITLE_STYLES = [
+    "hormozi",
+    "classic",
+    "modern",
+    "karaoke",
+    "neon",
+    "cinematic",
+    "boxed",
+    "comic",
+]
+SUBTITLE_ANIMATIONS = [
+    "pop",
+    "bounce",
+    "fade",
+    "slide_up",
+    "slide_down",
+    "typewriter",
+    "glow_pulse",
+    "none",
+]
+SUBTITLE_POSITIONS = ["bottom", "middle", "top"]
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 INSTRUCTIONS_FILENAME = "custom_instructions.md"
 
@@ -95,6 +118,15 @@ def project_paths(ctx):
     project_dir = Path(ctx["project_dir"])
     slug = _clean(ctx.get("slug")) or project_dir.name
     image_source = _clean(ctx.get("image_source"))
+    srt_file = project_dir / f"{slug}.srt"
+    if not srt_file.exists():
+        if (project_dir / "subtitle.srt").exists():
+            srt_file = project_dir / "subtitle.srt"
+        elif project_dir.is_dir():
+            srts = sorted(project_dir.glob("*.srt"))
+            if srts:
+                srt_file = srts[0]
+
     return {
         "project_dir": project_dir,
         "slug": slug,
@@ -105,10 +137,12 @@ def project_paths(ctx):
         "audio": project_dir / "audio.mp3",
         "enhanced_audio": project_dir / "enhanced_audio.mp3",
         "srt_prefix": project_dir / slug,
-        "srt": project_dir / f"{slug}.srt",
+        "srt": srt_file,
         "beat_json": project_dir / "beat.json",
         "video": project_dir / f"{slug}.mp4",
         "final": project_dir / "final.mp4",
+        "subtitled": project_dir / "final_subtitled.mp4",
+        "ass": project_dir / f"{slug}.ass",
         "image_source": Path(image_source).expanduser() if image_source else None,
     }
 
@@ -306,13 +340,23 @@ def build_subtitle_cmd(ctx, settings):
     whisper = settings.get("whisper", {})
     model = whisper.get("model") or "models/ggml-tiny.en.bin"
     whisper_cli = whisper.get("cli_path") or "./build/bin/whisper-cli"
+    use_gpu = bool(ctx.get("use_gpu", False))
 
     q = shlex.quote
+    if use_gpu:
+        # Try GPU first (-dev 0). If GPU fails or is not supported by the build, fall back to CPU (-ng).
+        whisper_exec = (
+            f'{q(whisper_cli)} -m {q(model)} -f "$tmp" -osrt -of {q(str(paths["srt_prefix"]))} -dev 0 || '
+            f'{q(whisper_cli)} -m {q(model)} -f "$tmp" -osrt -of {q(str(paths["srt_prefix"]))} -ng'
+        )
+    else:
+        whisper_exec = f'{q(whisper_cli)} -m {q(model)} -f "$tmp" -osrt -of {q(str(paths["srt_prefix"]))} -ng'
+
     shell_cmd = (
         'tmp=$(mktemp --suffix=.wav) && '
         f'ffmpeg -hide_banner -loglevel error -y -i {q(str(paths["enhanced_audio"]))} '
         '-ar 16000 -ac 1 -c:a pcm_s16le "$tmp" && '
-        f'{q(whisper_cli)} -m {q(model)} -f "$tmp" -osrt -of {q(str(paths["srt_prefix"]))} ; '
+        f'{whisper_exec} ; '
         'status=$? ; rm -f "$tmp" ; exit $status'
     )
     return shell_cmd, _job_dir("subtitle", settings), True
@@ -377,6 +421,10 @@ def build_editor_cmd(ctx, settings):
     seed = _clean(ctx.get("seed"))
     if seed:
         cmd += ["--seed", seed]
+    if ctx.get("use_gpu"):
+        cmd += ["--gpu", "true"]
+    else:
+        cmd += ["--gpu", "false"]
     return cmd, _job_dir("editor", settings), False
 
 
@@ -434,6 +482,10 @@ def build_audio_add_cmd(ctx, settings):
         "--out", str(paths["final"]),
         "--extend-video",
     ]
+    if ctx.get("use_gpu"):
+        cmd += ["--gpu", "true"]
+    else:
+        cmd += ["--gpu", "false"]
     return cmd, _job_dir("audio_add", settings), False
 
 
@@ -442,6 +494,49 @@ def precheck_audio_add(ctx, settings):
     return _missing_files(
         [("rendered video", paths["video"]), ("enhanced_audio.mp3", paths["enhanced_audio"])]
     ), []
+
+
+# --------------------------------------------------------------------------- #
+# 9. subtitle worker
+# --------------------------------------------------------------------------- #
+
+
+def build_subtitle_burn_cmd(ctx, settings):
+    paths = project_paths(ctx)
+    cmd = [
+        _python(settings), "subtitle_worker.py",
+        "--video", str(paths["final"]),
+        "--srt", str(paths["srt"]),
+        "--out", str(paths["subtitled"]),
+        "--style", _pick(ctx.get("subtitle_style"), SUBTITLE_STYLES, "hormozi"),
+        "--animation", _pick(ctx.get("subtitle_animation"), SUBTITLE_ANIMATIONS, "pop"),
+        "--position", _pick(ctx.get("subtitle_position"), SUBTITLE_POSITIONS, "bottom"),
+        "--max-words", str(max(0, _number(ctx.get("subtitle_max_words"), 3, int))),
+    ]
+    if ctx.get("subtitle_uppercase"):
+        cmd.append("--uppercase")
+    font = _clean(ctx.get("subtitle_font"))
+    if font:
+        cmd += ["--font", font]
+    font_size = _number(ctx.get("subtitle_font_size"), 0, int)
+    if font_size > 0:
+        cmd += ["--font-size", str(font_size)]
+    if ctx.get("use_gpu"):
+        cmd += ["--gpu", "true"]
+    else:
+        cmd += ["--gpu", "false"]
+
+    return cmd, _job_dir("subtitle_burn", settings), False
+
+
+def precheck_subtitle_burn(ctx, settings):
+    paths = project_paths(ctx)
+    errors = []
+    if not paths["final"].exists():
+        errors.append(f"Muxed video not found: {paths['final']} (run Step 8: Audio Adder first)")
+    if not paths["srt"].exists():
+        errors.append(f"Subtitles (.srt) not found: {paths['srt']} (run Step 5: Subtitle Generator first)")
+    return errors, []
 
 
 # --------------------------------------------------------------------------- #
@@ -510,6 +605,13 @@ JOBS = [
         "label": "8. Audio Adder",
         "builder": build_audio_add_cmd,
         "precheck": precheck_audio_add,
+        "auto_pause_after": False,
+    },
+    {
+        "id": "subtitle_burn",
+        "label": "9. Subtitle Worker",
+        "builder": build_subtitle_burn_cmd,
+        "precheck": precheck_subtitle_burn,
         "auto_pause_after": False,
     },
 ]

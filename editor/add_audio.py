@@ -15,6 +15,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from .ffmpeg_gpu import get_video_encoder_config, str2bool, VideoEncoderConfig
+except ImportError:
+    from ffmpeg_gpu import get_video_encoder_config, str2bool, VideoEncoderConfig
+
 
 def check_tool(name: str) -> None:
     if shutil.which(name) is None:
@@ -37,17 +42,25 @@ def probe_duration(path: Path):
 
 
 def build_command(video: Path, audio: Path, output: Path, bitrate: str, pad_seconds: float,
-                  audio_fade_out: float, audio_duration):
-    command = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-stats", "-y",
-               "-i", str(video), "-i", str(audio)]
+                  audio_fade_out: float, audio_duration, use_gpu: bool = False,
+                  enc_config: VideoEncoderConfig = None):
+    if enc_config is None:
+        enc_config = get_video_encoder_config(use_gpu=use_gpu, preset="medium", crf=18)
+
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-stats", "-y"]
+    if pad_seconds > 0.05 and enc_config.vaapi_device:
+        command += ["-vaapi_device", enc_config.vaapi_device]
+
+    command += ["-i", str(video), "-i", str(audio)]
 
     if pad_seconds > 0.05:
         # Hold the last frame so the picture lasts as long as the narration.
+        fmt = ",format=nv12,hwupload" if enc_config.needs_hwupload else ""
         command += [
-            "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}[v]",
+            "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f}{fmt}[v]",
             "-map", "[v]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
         ]
+        command += enc_config.args
     else:
         command += ["-map", "0:v:0", "-c:v", "copy"]
 
@@ -60,7 +73,7 @@ def build_command(video: Path, audio: Path, output: Path, bitrate: str, pad_seco
     return command
 
 
-def add_audio(video_path, audio_path, output_path, bitrate="192k", extend_video=False, audio_fade_out=0.0):
+def add_audio(video_path, audio_path, output_path, bitrate="192k", extend_video=False, audio_fade_out=0.0, use_gpu=False):
     video = Path(video_path).expanduser()
     audio = Path(audio_path).expanduser()
     output = Path(output_path).expanduser()
@@ -88,14 +101,24 @@ def add_audio(video_path, audio_path, output_path, bitrate="192k", extend_video=
             print(f"Note: video is {-diff:.2f}s longer than the audio; the output ends with the audio.")
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    command = build_command(video, audio, output, bitrate, pad_seconds, audio_fade_out, audio_duration)
+    enc_config = get_video_encoder_config(use_gpu=use_gpu, preset="medium", crf=18)
+    command = build_command(video, audio, output, bitrate, pad_seconds, audio_fade_out, audio_duration, use_gpu=use_gpu, enc_config=enc_config)
 
     print("Adding audio...")
     print(" ".join(command))
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as exc:
-        sys.exit(f"\nFFmpeg failed with exit code {exc.returncode}.")
+        if pad_seconds > 0.05 and enc_config.encoder_type != "cpu":
+            print(f"\n[WARNING] GPU video encoding failed (exit code {exc.returncode}). Retrying with CPU (libx264)...")
+            cpu_config = get_video_encoder_config(use_gpu=False, preset="medium", crf=18)
+            cpu_command = build_command(video, audio, output, bitrate, pad_seconds, audio_fade_out, audio_duration, use_gpu=False, enc_config=cpu_config)
+            try:
+                subprocess.run(cpu_command, check=True)
+            except subprocess.CalledProcessError as cpu_exc:
+                sys.exit(f"\nFFmpeg CPU fallback failed with exit code {cpu_exc.returncode}.")
+        else:
+            sys.exit(f"\nFFmpeg failed with exit code {exc.returncode}.")
     except KeyboardInterrupt:
         sys.exit("\nCancelled.")
     print(f"\nDone: {output}")
@@ -111,9 +134,17 @@ def main():
                         help="Hold the last frame until the audio ends instead of cutting the audio.")
     parser.add_argument("--audio-fade-out", type=float, default=0.0,
                         help="Fade the audio out over the last N seconds (0 = off).")
+    parser.add_argument(
+        "--gpu",
+        nargs="?",
+        const=True,
+        default=False,
+        type=str2bool,
+        help="Use GPU acceleration (NVENC/VAAPI) if re-encoding video.",
+    )
     args = parser.parse_args()
 
-    add_audio(args.video, args.audio, args.out, args.bitrate, args.extend_video, args.audio_fade_out)
+    add_audio(args.video, args.audio, args.out, args.bitrate, args.extend_video, args.audio_fade_out, use_gpu=args.gpu)
 
 
 if __name__ == "__main__":

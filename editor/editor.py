@@ -38,6 +38,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+try:
+    from .ffmpeg_gpu import get_video_encoder_config, str2bool, VideoEncoderConfig
+except ImportError:
+    from ffmpeg_gpu import get_video_encoder_config, str2bool, VideoEncoderConfig
+
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 ASPECT_PRESETS: Dict[str, Tuple[int, int]] = {
@@ -122,6 +127,7 @@ class RenderOptions:
     rng: random.Random
     preset: str
     crf: int
+    gpu: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -409,25 +415,36 @@ def segment_filter(index: int, seg: Segment, opt: RenderOptions) -> str:
     ])
 
 
-def build_filter_complex(segments: List[Segment], opt: RenderOptions) -> str:
+def build_filter_complex(segments: List[Segment], opt: RenderOptions, hwupload: bool = False) -> str:
     parts = [segment_filter(i, seg, opt) for i, seg in enumerate(segments)]
     inputs = "".join(f"[v{i}]" for i in range(len(segments)))
-    parts.append(f"{inputs}concat=n={len(segments)}:v=1:a=0,format=yuv420p[outv]")
+    fmt = "format=nv12,hwupload" if hwupload else "format=yuv420p"
+    parts.append(f"{inputs}concat=n={len(segments)}:v=1:a=0,{fmt}[outv]")
     return ";\n".join(parts) + "\n"
 
 
-def build_command(segments: List[Segment], opt: RenderOptions, output: Path, filter_script: Path) -> List[str]:
+def build_command(
+    segments: List[Segment],
+    opt: RenderOptions,
+    output: Path,
+    filter_script: Path,
+    enc_config: Optional[VideoEncoderConfig] = None,
+) -> List[str]:
+    if enc_config is None:
+        enc_config = get_video_encoder_config(use_gpu=opt.gpu, preset=opt.preset, crf=opt.crf)
+
     command = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-stats", "-y"]
+    if enc_config.vaapi_device:
+        command += ["-vaapi_device", enc_config.vaapi_device]
     for seg in segments:
         # One still per input; zoompan turns it into seg.frames frames.
         command += ["-i", str(seg.image)]
     command += [
         "-filter_complex_script", str(filter_script),
         "-map", "[outv]",
-        "-c:v", "libx264",
-        "-preset", opt.preset,
-        "-crf", str(opt.crf),
-        "-pix_fmt", "yuv420p",
+    ]
+    command += enc_config.args
+    command += [
         "-movflags", "+faststart",
         "-r", str(opt.fps),
         str(output),
@@ -497,6 +514,14 @@ def build_parser() -> argparse.ArgumentParser:
     enc = parser.add_argument_group("encoding")
     enc.add_argument("--preset", default="medium", help="libx264 preset.")
     enc.add_argument("--crf", type=int, default=18, help="libx264 CRF quality (lower = better).")
+    enc.add_argument(
+        "--gpu",
+        nargs="?",
+        const=True,
+        default=False,
+        type=str2bool,
+        help="Use GPU acceleration (NVENC/VAAPI) for video encoding with CPU fallback.",
+    )
 
     misc = parser.add_argument_group("misc")
     misc.add_argument("--on-missing", default="hold", choices=ON_MISSING,
@@ -546,7 +571,7 @@ def run(args: argparse.Namespace) -> int:
         fit=args.fit, zoom=args.zoom, fade_duration=max(0.0, args.fade_duration),
         slide_duration=max(0.05, args.slide_duration), bg_color=args.bg_color,
         random_pool=parse_pool(args.random_pool), rng=random.Random(seed),
-        preset=args.preset, crf=args.crf,
+        preset=args.preset, crf=args.crf, gpu=args.gpu,
     )
 
     images = find_images(imagesource)
@@ -568,6 +593,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"Animation    : {args.animation}  transition={args.transition}  smoothness={args.smoothness}  zoom={args.zoom}")
     if args.animation == "random" or any(b["animation"] == "random" for b in beats):
         print(f"Random seed  : {seed}  (pass --seed {seed} to reproduce)")
+    print(f"GPU encode   : {args.gpu}")
     print(f"Output       : {output}")
     print("========================================")
     print()
@@ -577,10 +603,13 @@ def run(args: argparse.Namespace) -> int:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     filter_script = output.with_name(f"{output.stem}.filter.txt")
-    filter_graph = build_filter_complex(segments, options)
-    command = build_command(segments, options, output, filter_script)
+
+    enc_config = get_video_encoder_config(use_gpu=options.gpu, preset=options.preset, crf=options.crf)
+    filter_graph = build_filter_complex(segments, options, hwupload=enc_config.needs_hwupload)
+    command = build_command(segments, options, output, filter_script, enc_config=enc_config)
 
     if args.dry_run:
+        print(f"Encoder      : {enc_config.encoder_type.upper()} ({enc_config.codec})")
         print("Filter graph:")
         print(filter_graph)
         print("Command:")
@@ -588,15 +617,31 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     filter_script.write_text(filter_graph, encoding="utf-8")
-    print("Starting FFmpeg...")
+    print(f"Starting FFmpeg ({enc_config.encoder_type.upper()})...")
     print()
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as exc:
-        print()
-        print(f"FFmpeg failed with exit code {exc.returncode}.")
-        print(f"The filter graph was kept for inspection: {filter_script}")
-        return exc.returncode or 1
+        if enc_config.encoder_type != "cpu":
+            print()
+            print(f"[WARNING] FFmpeg GPU ({enc_config.encoder_type}) failed with exit code {exc.returncode}.")
+            print("Retrying with CPU encoding (libx264)...")
+            cpu_config = get_video_encoder_config(use_gpu=False, preset=options.preset, crf=options.crf)
+            cpu_filter_graph = build_filter_complex(segments, options, hwupload=False)
+            cpu_command = build_command(segments, options, output, filter_script, enc_config=cpu_config)
+            filter_script.write_text(cpu_filter_graph, encoding="utf-8")
+            try:
+                subprocess.run(cpu_command, check=True)
+            except subprocess.CalledProcessError as cpu_exc:
+                print()
+                print(f"FFmpeg CPU fallback failed with exit code {cpu_exc.returncode}.")
+                print(f"The filter graph was kept for inspection: {filter_script}")
+                return cpu_exc.returncode or 1
+        else:
+            print()
+            print(f"FFmpeg failed with exit code {exc.returncode}.")
+            print(f"The filter graph was kept for inspection: {filter_script}")
+            return exc.returncode or 1
     except KeyboardInterrupt:
         print()
         print("Cancelled.")
