@@ -44,9 +44,21 @@ python3 add_audio.py \
   --out "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final.mp4" \
   --gpu true
 
+### SFX Adder (Beat Pops & Semantic Sound Effects)
+python3 sfx_adder.py \
+  --video "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final.mp4" \
+  --srt "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/dog-story.srt" \
+  --beat "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/beat.json" \
+  --voiceover "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/voiceover.md" \
+  --library "library" \
+  --out "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final_sfx.mp4" \
+  --cues-out "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/sfx_cues.json" \
+  --sfx-volume 0.5 \
+  --pop-volume 0.4
+
 ### Subtitle Worker (GPU supported with CPU fallback)
 python3 subtitle_worker.py \
-  --video "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final.mp4" \
+  --video "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final_sfx.mp4" \
   --srt "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/dog-story.srt" \
   --out "/home/kingnit/Desktop/youtube pipline/out/dog-sad-story/final_subtitled.mp4" \
   --style hormozi \

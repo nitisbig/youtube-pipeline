@@ -127,6 +127,7 @@ class RenderOptions:
     rng: random.Random
     preset: str
     crf: int
+    bg_image: Optional[Path] = None
     gpu: bool = False
 
 
@@ -317,6 +318,23 @@ def ease_expr(progress: str, easing: str) -> str:
     return f"if(lt({p},0.5),2*pow({p},2),1-pow(-2*{p}+2,2)/2)"
 
 
+def normalize_color(raw: Optional[str]) -> str:
+    """Normalize color strings (name, hex with # or 0x) into FFmpeg compatible color."""
+    if not raw:
+        return "black"
+    val = raw.strip()
+    if not val:
+        return "black"
+    if val.startswith("#"):
+        hex_part = val[1:]
+        if len(hex_part) == 3:
+            hex_part = "".join(c * 2 for c in hex_part)
+        return f"0x{hex_part}"
+    if len(val) in (6, 8) and all(c in "0123456789abcdefABCDEF" for c in val):
+        return f"0x{val}"
+    return val
+
+
 def fit_filter(width: int, height: int, fit: str, bg_color: str) -> str:
     if fit == "contain":
         return (
@@ -360,7 +378,7 @@ def zoompan_exprs(animation: str, progress: str, zoom: float, rng: random.Random
     return "1", center_x, center_y  # static presets
 
 
-def segment_filter(index: int, seg: Segment, opt: RenderOptions) -> str:
+def segment_filter(index: int, seg: Segment, opt: RenderOptions, has_bg_image: bool = False) -> str:
     """Filter chain(s) turning input `index` into a [v<index>] stream of seg.frames frames."""
     width, height, fps = opt.width, opt.height, opt.fps
     frames = seg.frames
@@ -388,9 +406,9 @@ def segment_filter(index: int, seg: Segment, opt: RenderOptions) -> str:
     if transition in ("fadein", "fade"):
         fade = min(opt.fade_duration, duration / 2)
         if fade >= 0.02:
-            post.append(f"fade=t=in:st=0:d={fmt(fade)}")
+            post.append(f"fade=t=in:st=0:d={fmt(fade)}:c={opt.bg_color}")
             if transition == "fade":
-                post.append(f"fade=t=out:st={fmt(duration - fade)}:d={fmt(fade)}")
+                post.append(f"fade=t=out:st={fmt(duration - fade)}:d={fmt(fade)}:c={opt.bg_color}")
     post.append("format=yuv420p")
 
     if animation not in SLIDE_ANIMATIONS:
@@ -408,6 +426,12 @@ def segment_filter(index: int, seg: Segment, opt: RenderOptions) -> str:
     elif animation == "slide_down":
         oy = f"-main_h*(1-{eased})"
 
+    if has_bg_image:
+        return ";\n".join([
+            f"{head}[s{index}]",
+            f"[b{index}][s{index}]overlay=x='{ox}':y='{oy}':shortest=1,{','.join(post)}[v{index}]",
+        ])
+
     return ";\n".join([
         f"{head}[s{index}]",
         f"color=c={opt.bg_color}:s={width}x{height}:r={fps}:d={fmt(duration)}[b{index}]",
@@ -416,7 +440,34 @@ def segment_filter(index: int, seg: Segment, opt: RenderOptions) -> str:
 
 
 def build_filter_complex(segments: List[Segment], opt: RenderOptions, hwupload: bool = False) -> str:
-    parts = [segment_filter(i, seg, opt) for i, seg in enumerate(segments)]
+    slide_indices = [i for i, seg in enumerate(segments) if (seg.animation or "none") in SLIDE_ANIMATIONS]
+    has_bg_image = bool(opt.bg_image and opt.bg_image.is_file() and slide_indices)
+
+    parts: List[str] = []
+    if has_bg_image:
+        bg_idx = len(segments)
+        k_count = len(slide_indices)
+        scale_cmd = (
+            f"scale={opt.width}:{opt.height}:force_original_aspect_ratio=increase,"
+            f"crop={opt.width}:{opt.height},setsar=1"
+        )
+        if k_count == 1:
+            parts.append(f"[{bg_idx}:v]{scale_cmd}[bg_base_0]")
+        else:
+            split_labels = "".join(f"[bg_base_{k}]" for k in range(k_count))
+            parts.append(f"[{bg_idx}:v]{scale_cmd},split={k_count}{split_labels}")
+
+        for k, seg_idx in enumerate(slide_indices):
+            seg_frames = segments[seg_idx].frames
+            parts.append(
+                f"[bg_base_{k}]loop=loop=-1:size=1:start=0,fps={opt.fps},"
+                f"trim=end_frame={seg_frames},setpts=PTS-STARTPTS[b{seg_idx}]"
+            )
+
+    parts.extend(
+        segment_filter(i, seg, opt, has_bg_image=(has_bg_image and i in slide_indices))
+        for i, seg in enumerate(segments)
+    )
     inputs = "".join(f"[v{i}]" for i in range(len(segments)))
     fmt = "format=nv12,hwupload" if hwupload else "format=yuv420p"
     parts.append(f"{inputs}concat=n={len(segments)}:v=1:a=0,{fmt}[outv]")
@@ -439,6 +490,12 @@ def build_command(
     for seg in segments:
         # One still per input; zoompan turns it into seg.frames frames.
         command += ["-i", str(seg.image)]
+
+    # Add background image input if required
+    slide_indices = [i for i, seg in enumerate(segments) if (seg.animation or "none") in SLIDE_ANIMATIONS]
+    if opt.bg_image and opt.bg_image.is_file() and slide_indices:
+        command += ["-i", str(opt.bg_image)]
+
     command += [
         "-filter_complex_script", str(filter_script),
         "-map", "[outv]",
@@ -508,7 +565,8 @@ def build_parser() -> argparse.ArgumentParser:
     frame.add_argument("--aspect", default="16:9", choices=sorted(ASPECT_PRESETS), help="Target aspect ratio.")
     frame.add_argument("--size", default=None, help="Explicit WxH output size (overrides --aspect).")
     frame.add_argument("--fit", default="cover", choices=FIT_MODES, help="cover crops, contain letterboxes.")
-    frame.add_argument("--bg-color", default="black", help="Background for letterboxing and slide-ins.")
+    frame.add_argument("--bg-color", default="black", help="Background color (name or hex code) for letterboxing and slide-ins.")
+    frame.add_argument("--bg-image", default=None, help="Optional background image for slide transitions and letterboxing.")
     frame.add_argument("--fps", type=int, default=30, help="Output FPS.")
 
     enc = parser.add_argument_group("encoding")
@@ -564,12 +622,22 @@ def run(args: argparse.Namespace) -> int:
     output = Path(args.out).expanduser().resolve()
     width, height = resolve_size(args.aspect, args.size)
 
+    bg_image_path: Optional[Path] = None
+    if args.bg_image:
+        p = Path(args.bg_image).expanduser().resolve()
+        if not p.is_file():
+            raise EditorError(f"--bg-image file does not exist: {p}")
+        bg_image_path = p
+
+    normalized_bg_color = normalize_color(args.bg_color)
+
     seed = args.seed if args.seed is not None else random.randrange(1, 2**31)
     options = RenderOptions(
         width=width, height=height, fps=args.fps,
         animation=args.animation, transition=args.transition, easing=args.smoothness,
         fit=args.fit, zoom=args.zoom, fade_duration=max(0.0, args.fade_duration),
-        slide_duration=max(0.05, args.slide_duration), bg_color=args.bg_color,
+        slide_duration=max(0.05, args.slide_duration), bg_color=normalized_bg_color,
+        bg_image=bg_image_path,
         random_pool=parse_pool(args.random_pool), rng=random.Random(seed),
         preset=args.preset, crf=args.crf, gpu=args.gpu,
     )
@@ -591,6 +659,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"Scenes       : {len(segments)} of {len(beats)} beats")
     print(f"Frame        : {width}x{height} ({args.size or args.aspect}, fit={args.fit}) @ {args.fps} fps")
     print(f"Animation    : {args.animation}  transition={args.transition}  smoothness={args.smoothness}  zoom={args.zoom}")
+    print(f"Background   : color={options.bg_color}" + (f"  image={options.bg_image}" if options.bg_image else ""))
     if args.animation == "random" or any(b["animation"] == "random" for b in beats):
         print(f"Random seed  : {seed}  (pass --seed {seed} to reproduce)")
     print(f"GPU encode   : {args.gpu}")

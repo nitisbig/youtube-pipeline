@@ -59,6 +59,7 @@ BASE_URL = os.getenv("BASE_URL", "https://api.openai.com/v1").strip()
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.0"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8000"))
 TIMEOUT = float(os.getenv("TIMEOUT", "120"))
+DEFAULT_VIDEO_DURATION = float(os.getenv("DEFAULT_VIDEO_DURATION", "8.0"))
 
 
 class AlignmentError(Exception):
@@ -116,6 +117,29 @@ def seconds_to_timestamp(seconds: float) -> str:
     milliseconds %= 1000
 
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{milliseconds:03d}"
+
+
+def extract_video_tag(prefix: str, text: str) -> tuple[bool, float, str]:
+    """
+    Extract video/clip tags from label prefix or text.
+    Returns (is_video: bool, duration: float, cleaned_text: str).
+    """
+    combined = f"{prefix} {text}"
+    tag_pattern = re.compile(
+        r"[\[\(\<]\s*(?:video(?:_clip)?|clip)\s*(?::\s*(\d+(?:\.\d+)?)\s*s?)?\s*[\]\)\>]",
+        re.IGNORECASE,
+    )
+    match = tag_pattern.search(combined)
+    if not match:
+        text_clean = re.sub(r"[\[\(\<]\s*image\s*[\]\)\>]\s*:?", "", text, flags=re.IGNORECASE).strip()
+        return False, DEFAULT_VIDEO_DURATION, text_clean
+
+    dur_str = match.group(1)
+    duration = float(dur_str) if dur_str else DEFAULT_VIDEO_DURATION
+
+    cleaned_text = tag_pattern.sub("", text).strip()
+    cleaned_text = re.sub(r"^[:\-\u2192=>\s]+", "", cleaned_text).strip()
+    return True, duration, cleaned_text
 
 
 # ---------------------------------------------------------------------------
@@ -191,11 +215,12 @@ def parse_beats(beat_text: str) -> list[dict[str, Any]]:
     Parse common beat.md formats:
 
         beat1 → narration          (what script-gen writes)
-        beat 1 -> narration
-        Image 1: narration
-        # Image 1 / ## 1 heading followed by a description
-        1. narration
-        blank-line separated paragraphs (fallback)
+        beat[1] -> narration       (bracketed index format)
+        [1] -> narration           (bracketed numbered format)
+        Beat 1 [video]: narration  (tagged formats)
+        1. narration               (markdown numbered list)
+        # Image 1 [video: 5s]      (headings)
+        blank-line or single-line separated paragraphs (fallback)
     """
     beat_text = beat_text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
@@ -204,46 +229,64 @@ def parse_beats(beat_text: str) -> list[dict[str, Any]]:
 
     beats: list[dict[str, Any]] = []
 
-    # Format 1: "beat1 → text", "beat 12 -> text", "Image 3: text", "scene 2 - text"
-    labelled_pattern = re.compile(
-        r"(?mi)^\s*(?:image|img|beat|scene|shot)\s*#?\s*(\d+)\s*(?:\u2192|->|=>|:|-|\u2013|\u2014)\s*(.+?)\s*$"
+    # Combined regex to match headings and labelled lines
+    cue_pattern = re.compile(
+        r"(?mi)^\s*(?:"
+        # Heading style: # Image 1, ## 1, # beat[1]
+        r"(?P<heading>#{1,6}\s*(?:image|img|beat|scene|shot)?\s*#?\[?\(?(?P<hid>\d+)\)?\]?\s*(?:\[[^\]\n]*\]|\([^\)\n]*\)|<[^>\n]*>)?\s*[:\-]?\s*$)"
+        r"|"
+        # Line style: beat1 -> text, beat[1] -> text, [1] -> text, Beat 1 [video]: text, 1. text
+        r"(?P<line>"
+        r"(?P<label>"
+        r"\*{0,2}"
+        r"(?:\[|\()?\s*"
+        r"(?:(?:image|img|beat|scene|shot)\s*)?"
+        r"#?\[?\(?(?P<lid>\d+)\)?\]?"
+        r"\s*(?:\]|\))?"
+        r"\s*(?:\[[^\]\n]*\]|\([^\)\n]*\)|<[^>\n]*>)?"
+        r"\*{0,2}\s*"
+        r"(?:\u2192|->|=>|:|-|\u2013|\u2014|\.|\))\s+"
+        r")"
+        r"(?P<text>.+?)\s*$"
+        r")"
+        r")"
     )
-    labelled = list(labelled_pattern.finditer(beat_text))
-    if labelled:
-        for match in labelled:
-            beats.append({"image_id": int(match.group(1)), "text": match.group(2).strip()})
-        return _dedupe(beats)
 
-    # Format 2: markdown headings "# Image 1" / "## 1" followed by a description
-    heading_pattern = re.compile(
-        r"(?m)^\s*#{1,6}\s*(?:image|img|beat|scene|shot)?\s*(\d+)\s*[:\-]?\s*$",
-        re.IGNORECASE,
-    )
-    matches = list(heading_pattern.finditer(beat_text))
+    matches = []
+    for m in cue_pattern.finditer(beat_text):
+        if m.group("heading"):
+            matches.append((m.start(), m.end(), int(m.group("hid")), m.group("heading"), "", True))
+        elif m.group("line"):
+            label = m.group("label")
+            if re.search(r"\b(?:image|img|beat|scene|shot)|[\[\(]\s*\d+\s*[\]\)]|^\s*\*{0,2}\d+[.)\->:\u2192]", label, re.IGNORECASE):
+                matches.append((m.start(), m.end(), int(m.group("lid")), label, m.group("text"), False))
+
     if matches:
-        for i, match in enumerate(matches):
-            start = match.end()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(beat_text)
-            beats.append({"image_id": int(match.group(1)), "text": beat_text[start:end].strip()})
+        for i, (m_start, m_end, image_id, label, line_text, is_heading) in enumerate(matches):
+            next_start = matches[i + 1][0] if i + 1 < len(matches) else len(beat_text)
+            chunk = beat_text[m_start:next_start].strip()
+            if is_heading:
+                body = chunk[len(label):].strip()
+            else:
+                body = chunk[len(label):].strip() if chunk.startswith(label.strip()) else line_text.strip()
+            is_vid, dur, text = extract_video_tag(label, body)
+            beats.append({"image_id": image_id, "text": text, "is_video": is_vid, "video_duration": dur})
         return _dedupe(beats)
 
-    # Format 3: numbered list "1. text"
-    numbered_pattern = re.compile(r"(?m)^\s*(\d+)[.)]\s+(.+?)\s*$")
-    numbered = list(numbered_pattern.finditer(beat_text))
-    if numbered:
-        for match in numbered:
-            beats.append({"image_id": int(match.group(1)), "text": match.group(2).strip()})
-        return _dedupe(beats)
+    # Fallback: each non-empty paragraph (or non-empty line if single block) is an image.
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", beat_text) if p.strip()]
+    if len(paragraphs) <= 1:
+        lines = [line.strip() for line in beat_text.splitlines() if line.strip()]
+        if len(lines) > 1:
+            paragraphs = lines
 
-    # Fallback: each non-empty paragraph is an image.
-    for image_id, paragraph in enumerate(re.split(r"\n\s*\n", beat_text), start=1):
-        paragraph = paragraph.strip()
-        if paragraph:
-            beats.append({"image_id": image_id, "text": paragraph})
+    for image_id, paragraph in enumerate(paragraphs, start=1):
+        is_vid, dur, text = extract_video_tag("", paragraph)
+        beats.append({"image_id": image_id, "text": text, "is_video": is_vid, "video_duration": dur})
 
     if not beats:
         die("Could not identify any beats in beat.md.")
-    return beats
+    return _dedupe(beats)
 
 
 def _dedupe(beats: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -503,20 +546,100 @@ def proportional_alignment(
     beats: list[dict[str, Any]],
     subtitles: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Fallback: share the spoken duration between beats by word count."""
+    """Fallback: share the spoken duration between beats by word count, respecting video durations."""
     video_start = subtitles[0]["start"]
     video_end = subtitles[-1]["end"]
     total = max(0.1, video_end - video_start)
-    weights = [max(1, len(beat["text"].split())) for beat in beats]
-    weight_sum = sum(weights)
+
+    video_time = sum(b.get("video_duration", DEFAULT_VIDEO_DURATION) for b in beats if b.get("is_video"))
+    image_time = max(0.0, total - video_time)
+
+    weights = [max(1, len(beat["text"].split())) if not beat.get("is_video") else 0 for beat in beats]
+    weight_sum = sum(weights) or 1
 
     result = []
     cursor = video_start
     for beat, weight in zip(beats, weights):
-        length = total * weight / weight_sum
-        result.append({"image_id": beat["image_id"], "start_time": round(cursor, 3), "end_time": round(cursor + length, 3)})
+        if beat.get("is_video"):
+            length = beat.get("video_duration", DEFAULT_VIDEO_DURATION)
+            item = {
+                "image_id": beat["image_id"],
+                "start_time": round(cursor, 3),
+                "end_time": round(cursor + length, 3),
+                "is_video": True,
+            }
+        else:
+            length = image_time * weight / weight_sum
+            item = {
+                "image_id": beat["image_id"],
+                "start_time": round(cursor, 3),
+                "end_time": round(cursor + length, 3),
+            }
+        result.append(item)
         cursor += length
+
     result[-1]["end_time"] = round(video_end, 3)
+    return result
+
+
+def adjust_timeline_for_videos(
+    initial: list[dict[str, Any]],
+    beats: list[dict[str, Any]],
+    video_start: float,
+    video_end: float,
+    default_video_duration: float = DEFAULT_VIDEO_DURATION,
+) -> list[dict[str, Any]]:
+    """
+    Ensure video clips receive their exact designated duration and timeline is continuous.
+    """
+    if not initial:
+        return initial
+
+    beat_map = {b["image_id"]: b for b in beats}
+    total = max(0.1, video_end - video_start)
+
+    video_beats = [b for b in beats if b.get("is_video")]
+    if not video_beats:
+        return initial
+
+    total_video_time = sum(b.get("video_duration", default_video_duration) for b in video_beats)
+    remaining_image_time = max(0.0, total - total_video_time)
+
+    image_init_durs = []
+    for item in initial:
+        b = beat_map.get(item["image_id"], {})
+        if not b.get("is_video"):
+            image_init_durs.append(max(0.01, item["end_time"] - item["start_time"]))
+        else:
+            image_init_durs.append(0.0)
+
+    sum_init_durs = sum(image_init_durs) or 1.0
+
+    result = []
+    cursor = video_start
+    for item, init_d in zip(initial, image_init_durs):
+        b = beat_map.get(item["image_id"], {})
+        if b.get("is_video"):
+            dur = b.get("video_duration", default_video_duration)
+            out_item = {
+                "image_id": item["image_id"],
+                "start_time": round(cursor, 3),
+                "end_time": round(cursor + dur, 3),
+                "is_video": True,
+            }
+        else:
+            dur = remaining_image_time * (init_d / sum_init_durs)
+            out_item = {
+                "image_id": item["image_id"],
+                "start_time": round(cursor, 3),
+                "end_time": round(cursor + dur, 3),
+            }
+        result.append(out_item)
+        cursor += dur
+
+    result[-1]["end_time"] = round(video_end, 3)
+    for i in range(len(result) - 1):
+        result[i]["end_time"] = result[i + 1]["start_time"]
     return result
 
 
@@ -611,9 +734,16 @@ def main() -> None:
     beats = parse_beats(read_text(args.beatsource))
     subtitles = parse_srt(read_text(args.srtsource))
 
-    print(f"Detected images    : {len(beats)}")
-    print(f"Detected subtitles : {len(subtitles)}")
-    print(f"Video duration     : {seconds_to_timestamp(subtitles[-1]['end'])}")
+    video_beats = [b for b in beats if b.get("is_video")]
+    if video_beats:
+        print(f"Detected beats      : {len(beats)} ({len(beats) - len(video_beats)} images, {len(video_beats)} video clips)")
+        for vb in video_beats:
+            dur = vb.get("video_duration", DEFAULT_VIDEO_DURATION)
+            print(f"  - Beat {vb['image_id']}: [video] {dur}s reserved")
+    else:
+        print(f"Detected beats      : {len(beats)} ({len(beats)} images, 0 video clips)")
+    print(f"Detected subtitles  : {len(subtitles)}")
+    print(f"Video duration      : {seconds_to_timestamp(subtitles[-1]['end'])}")
     print()
 
     client = create_client()
@@ -635,6 +765,13 @@ def main() -> None:
     result = smooth_timings(result)
     if not args.keep_gaps:
         result = fill_gaps(result, subtitles[-1]["end"])
+    result = adjust_timeline_for_videos(
+        result,
+        beats,
+        subtitles[0]["start"],
+        subtitles[-1]["end"],
+        DEFAULT_VIDEO_DURATION,
+    )
 
     save_json(args.out, result)
 

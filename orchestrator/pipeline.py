@@ -166,6 +166,8 @@ class PipelineEngine:
         paths = job_defs.project_paths(self.ctx)
         if paths["subtitled"].exists():
             return paths["subtitled"]
+        if paths.get("final_sfx") and paths["final_sfx"].exists():
+            return paths["final_sfx"]
         return paths["final"]
 
     @staticmethod

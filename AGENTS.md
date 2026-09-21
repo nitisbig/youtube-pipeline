@@ -73,13 +73,18 @@ youtube-pipeline/
 │   ├── add_audio.py            # Step 8: Final audio muxing + last-frame hold extension
 │   └── ffmpeg_gpu.py           # Shared GPU probe and hardware acceleration config builder
 │
+├── sfx-adder/                  # Step 9: Beat Transitions & Contextual Sound Design
+│   ├── sfx_adder.py            # Step 9: Beat pop synchronizer & LLM semantic audio design
+│   ├── library/                # Sound effects library (soft-pop.mp3, camera-flash, woosh, etc.)
+│   └── .env                    # Groq/OpenAI configuration for semantic sound design
+│
 └── out/                        # Default output directory for projects
     └── <slug>/                 # Single folder containing all project artifacts and state
 ```
 
 ---
 
-## 3. The 9 Pipeline Steps & Contracts
+## 3. The 10 Pipeline Steps & Contracts
 
 Every step reads from and writes to the project directory (`out/<slug>/`). The table below outlines the precise data flow:
 
@@ -93,12 +98,15 @@ Every step reads from and writes to the project directory (`out/<slug>/`). The t
 | **6** | `beat` | Beat Aligner | `beat-gen/` | `uv run python beatalign.py` | `beat.md`, `<slug>.srt` | `beat.json` |
 | **7** | `editor` | Video Editor | `editor/` | `python3 editor.py` | `beat.json`, downloaded images | `<slug>.mp4` |
 | **8** | `audio_add` | Audio Adder | `editor/` | `python3 add_audio.py` | `<slug>.mp4`, `enhanced_audio.mp3` | `final.mp4` |
-| **9** | `subtitle_burn` | Subtitle Worker | `subtitle-gen/` | `python3 subtitle_worker.py` | `final.mp4`, `<slug>.srt` | `final_subtitled.mp4` |
+| **9** | `sfx` | SFX Adder | `sfx-adder/` | `python3 sfx_adder.py` | `final.mp4`, `<slug>.srt`, `beat.json`, `voiceover.md`, `library/` | `final_sfx.mp4`, `sfx_cues.json` |
+| **10** | `subtitle_burn` | Subtitle Worker | `subtitle-gen/` | `python3 subtitle_worker.py` | `final_sfx.mp4` (or `final.mp4`), `<slug>.srt` | `final_subtitled.mp4` |
 
 ### Important Pipeline Rules:
 - **Enhanced Audio Standard**: Step 3 produces `enhanced_audio.mp3`. All downstream audio consumers (Step 5 Subtitles, Step 8 Audio Adder) MUST consume `enhanced_audio.mp3`, keeping raw `audio.mp3` untouched.
 - **Auto-Pause Point**: Step 4 (`image`) triggers the browser extension via DevTools protocol and terminates immediately. It does **not** wait for downloads to finish. The orchestrator automatically pauses after Step 4 so the user or agent can verify that images are downloaded before resuming Step 5.
 - **Continuous Timeline**: Step 7 (`editor.py`) guarantees a contiguous visual timeline: beat gaps are held by repeating the previous image, and overlaps are clamped to the subsequent beat start time.
+- **Lossless SFX Passthrough**: Step 9 (`sfx_adder.py`) mixes beat pops and contextual sound effects directly into the audio stream with `-c:v copy`, executing in seconds without degrading or re-encoding visual frames.
+- **Adaptive Subtitle Burning**: Step 10 (`subtitle_burn`) burns subtitles onto `final_sfx.mp4` if present, falling back to `final.mp4` if the SFX step was skipped.
 
 ---
 

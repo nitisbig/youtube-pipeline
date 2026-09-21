@@ -141,6 +141,8 @@ def project_paths(ctx):
         "beat_json": project_dir / "beat.json",
         "video": project_dir / f"{slug}.mp4",
         "final": project_dir / "final.mp4",
+        "final_sfx": project_dir / "final_sfx.mp4",
+        "sfx_cues": project_dir / "sfx_cues.json",
         "subtitled": project_dir / "final_subtitled.mp4",
         "ass": project_dir / f"{slug}.ass",
         "image_source": Path(image_source).expanduser() if image_source else None,
@@ -418,6 +420,11 @@ def build_editor_cmd(ctx, settings):
         "--fps", str(max(1, _number(ctx.get("fps"), 30, int))),
         "--zoom", str(_number(ctx.get("zoom"), 0.18)),
     ]
+    bg_color = _clean(ctx.get("bg_color")) or "black"
+    cmd += ["--bg-color", bg_color]
+    bg_image = _clean(ctx.get("bg_image"))
+    if bg_image:
+        cmd += ["--bg-image", bg_image]
     seed = _clean(ctx.get("seed"))
     if seed:
         cmd += ["--seed", seed]
@@ -432,6 +439,12 @@ def precheck_editor(ctx, settings):
     paths = project_paths(ctx)
     errors = _missing_files([("beat.json", paths["beat_json"])])
     warnings = []
+
+    bg_image = _clean(ctx.get("bg_image"))
+    if bg_image:
+        p = Path(bg_image)
+        if not p.is_file():
+            errors.append(f"Background image not found: {bg_image}")
 
     image_dir = paths["image_source"]
     if image_dir is None:
@@ -497,15 +510,59 @@ def precheck_audio_add(ctx, settings):
 
 
 # --------------------------------------------------------------------------- #
-# 9. subtitle worker
+# 9. sfx adder
+# --------------------------------------------------------------------------- #
+
+
+def build_sfx_cmd(ctx, settings):
+    paths = project_paths(ctx)
+    root = Path(settings.get("pipeline_root", "."))
+    library_dir = root / _job_dir("sfx", settings) / "library"
+
+    cmd = [
+        _python(settings), "sfx_adder.py",
+        "--video", str(paths["final"]),
+        "--srt", str(paths["srt"]),
+        "--beat", str(paths["beat_json"]),
+        "--voiceover", str(paths["voiceover"]),
+        "--library", str(library_dir),
+        "--out", str(paths["final_sfx"]),
+        "--cues-out", str(paths["sfx_cues"]),
+        "--sfx-volume", str(_number(ctx.get("sfx_volume"), 0.5)),
+        "--pop-volume", str(_number(ctx.get("sfx_pop_volume"), 0.4)),
+        "--min-interval", str(_number(ctx.get("sfx_min_interval"), 3.0)),
+    ]
+    if ctx.get("sfx_include_first_beat"):
+        cmd.append("--include-first-beat")
+    return cmd, _job_dir("sfx", settings), False
+
+
+def precheck_sfx(ctx, settings):
+    paths = project_paths(ctx)
+    errors = _missing_files([
+        ("muxed video (final.mp4)", paths["final"]),
+        ("subtitles (.srt)", paths["srt"]),
+        ("beat timings (beat.json)", paths["beat_json"]),
+    ])
+    root = Path(settings.get("pipeline_root", "."))
+    library_dir = root / _job_dir("sfx", settings) / "library"
+    if not library_dir.is_dir():
+        errors.append(f"Sound library folder not found: {library_dir}")
+    return errors, []
+
+
+# --------------------------------------------------------------------------- #
+# 10. subtitle worker
 # --------------------------------------------------------------------------- #
 
 
 def build_subtitle_burn_cmd(ctx, settings):
     paths = project_paths(ctx)
+    # Prefer video with sound effects if present, otherwise fall back to final.mp4
+    input_video = paths["final_sfx"] if paths["final_sfx"].exists() else paths["final"]
     cmd = [
         _python(settings), "subtitle_worker.py",
-        "--video", str(paths["final"]),
+        "--video", str(input_video),
         "--srt", str(paths["srt"]),
         "--out", str(paths["subtitled"]),
         "--style", _pick(ctx.get("subtitle_style"), SUBTITLE_STYLES, "hormozi"),
@@ -532,8 +589,11 @@ def build_subtitle_burn_cmd(ctx, settings):
 def precheck_subtitle_burn(ctx, settings):
     paths = project_paths(ctx)
     errors = []
-    if not paths["final"].exists():
-        errors.append(f"Muxed video not found: {paths['final']} (run Step 8: Audio Adder first)")
+    if not paths["final_sfx"].exists() and not paths["final"].exists():
+        errors.append(
+            f"Input video not found: neither {paths['final_sfx']} nor {paths['final']} exists "
+            "(run Step 8: Audio Adder or Step 9: SFX Adder first)"
+        )
     if not paths["srt"].exists():
         errors.append(f"Subtitles (.srt) not found: {paths['srt']} (run Step 5: Subtitle Generator first)")
     return errors, []
@@ -608,8 +668,15 @@ JOBS = [
         "auto_pause_after": False,
     },
     {
+        "id": "sfx",
+        "label": "9. SFX Adder",
+        "builder": build_sfx_cmd,
+        "precheck": precheck_sfx,
+        "auto_pause_after": False,
+    },
+    {
         "id": "subtitle_burn",
-        "label": "9. Subtitle Worker",
+        "label": "10. Subtitle Worker",
         "builder": build_subtitle_burn_cmd,
         "precheck": precheck_subtitle_burn,
         "auto_pause_after": False,

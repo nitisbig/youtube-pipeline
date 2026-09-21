@@ -23,6 +23,9 @@
     "transition": "fade",
     "smoothness": "ease_in_out",
     "fit": "cover",
+    "bg_color": "black",
+    "bg_image": "",
+    "prompt_bg_on_edit": true,
     "fps": 30,
     "zoom": 0.18,
     "image_subfolder": false,
@@ -33,6 +36,10 @@
     "subtitle_uppercase": false,
     "subtitle_font": "",
     "subtitle_font_size": 0,
+    "sfx_volume": 0.5,
+    "sfx_pop_volume": 0.4,
+    "sfx_min_interval": 3.0,
+    "sfx_include_first_beat": false,
     "use_gpu": false
   },
   "job_dirs": {
@@ -44,6 +51,7 @@
     "beat": "beat-gen",
     "editor": "editor",
     "audio_add": "editor",
+    "sfx": "sfx-adder",
     "subtitle_burn": "subtitle-gen"
   },
   "whisper": {
@@ -62,6 +70,7 @@
     "beat": 2,
     "editor": 0,
     "audio_add": 0,
+    "sfx": 1,
     "subtitle_burn": 0
   },
   "retry_delay_seconds": 5

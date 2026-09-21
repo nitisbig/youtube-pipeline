@@ -31,7 +31,7 @@ import sys
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .config import Config
@@ -349,6 +349,7 @@ class App(tk.Tk):
         self._build_tab_script()
         self._build_tab_video()
         self._build_tab_subtitles()
+        self._build_tab_sfx()
 
     def _build_tab_project(self):
         tab = ttk.Frame(self.notebook)
@@ -484,11 +485,38 @@ class App(tk.Tk):
             variable=self.image_subfolder_var, command=self._on_subfolder_toggled,
         ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(2, 4))
 
+        # Background Color & Image
+        ttk.Label(grid, text="BG Color").grid(row=5, column=0, sticky="w", pady=4)
+        self.bg_color_var = tk.StringVar(value="black")
+        color_box = ttk.Frame(grid)
+        color_box.grid(row=5, column=1, sticky="w", padx=(4, 10), pady=4)
+        self.bg_color_entry = ttk.Entry(color_box, textvariable=self.bg_color_var, width=10)
+        self.bg_color_entry.pack(side="left")
+        self.bg_swatch = tk.Canvas(color_box, width=18, height=18, relief="ridge", bd=1)
+        self.bg_swatch.pack(side="left", padx=4)
+        ttk.Button(color_box, text="Pick...", width=6, command=self.on_pick_bg_color).pack(side="left")
+        self.bg_color_var.trace_add("write", self._update_color_swatch)
+
+        ttk.Label(grid, text="BG Image").grid(row=6, column=0, sticky="w", pady=4)
+        self.bg_image_var = tk.StringVar(value="")
+        self.bg_image_entry = ttk.Entry(grid, textvariable=self.bg_image_var, width=28)
+        self.bg_image_entry.grid(row=6, column=1, columnspan=2, sticky="we", padx=(4, 6), pady=4)
+        bg_btn_box = ttk.Frame(grid)
+        bg_btn_box.grid(row=6, column=3, sticky="w", pady=4)
+        ttk.Button(bg_btn_box, text="Browse...", width=8, command=self.on_browse_bg_image).pack(side="left")
+        ttk.Button(bg_btn_box, text="Clear", width=5, command=self.on_clear_bg_image).pack(side="left", padx=(2, 0))
+
+        self.prompt_bg_on_edit_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            grid, text="Ask for background before running Video Editor",
+            variable=self.prompt_bg_on_edit_var,
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(2, 4))
+
         # Hardware / GPU Acceleration
         self.use_gpu_var = tk.BooleanVar(value=bool(self.settings.get("defaults", {}).get("use_gpu", False)))
         hw_summary = get_hardware_status_summary()
         gpu_row = ttk.Frame(grid)
-        gpu_row.grid(row=5, column=0, columnspan=4, sticky="w", pady=(2, 2))
+        gpu_row.grid(row=8, column=0, columnspan=4, sticky="w", pady=(2, 2))
         ttk.Checkbutton(
             gpu_row, text="Use GPU Acceleration (--gpu true)", variable=self.use_gpu_var
         ).pack(side="left")
@@ -548,6 +576,59 @@ class App(tk.Tk):
 
         grid.columnconfigure(1, weight=1)
 
+    def _build_tab_sfx(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="Sound Effects")
+        grid = ttk.Frame(tab)
+        grid.pack(fill="x", padx=6, pady=6)
+
+        ttk.Label(grid, text="Beat Pop Vol").grid(row=0, column=0, sticky="w", pady=3)
+        self.sfx_pop_volume_var = tk.StringVar(value="0.4")
+        ttk.Entry(grid, textvariable=self.sfx_pop_volume_var, width=8).grid(
+            row=0, column=1, sticky="w", padx=(4, 12), pady=3
+        )
+
+        ttk.Label(grid, text="Context SFX Vol").grid(row=0, column=2, sticky="w", pady=3)
+        self.sfx_volume_var = tk.StringVar(value="0.5")
+        ttk.Entry(grid, textvariable=self.sfx_volume_var, width=8).grid(
+            row=0, column=3, sticky="w", padx=(4, 0), pady=3
+        )
+
+        ttk.Label(grid, text="Min Spacing (s)").grid(row=1, column=0, sticky="w", pady=3)
+        self.sfx_min_interval_var = tk.StringVar(value="3.0")
+        ttk.Entry(grid, textvariable=self.sfx_min_interval_var, width=8).grid(
+            row=1, column=1, sticky="w", padx=(4, 12), pady=3
+        )
+
+        self.sfx_first_beat_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            grid, text="Pop on first beat (0.00s)", variable=self.sfx_first_beat_var
+        ).grid(row=1, column=2, columnspan=2, sticky="w", pady=3)
+
+        desc_lbl = ttk.Label(
+            tab,
+            text=(
+                "• soft-pop.mp3 triggers at every beat cut.\n"
+                "• Contextual sounds (woosh, camera-flash, etc.) are matched from sfx-adder/library/\n"
+                "  using the voiceover narrative and subtitle timing."
+            ),
+            foreground="#64748b",
+            font=("Helvetica", 8),
+            justify="left",
+        )
+        desc_lbl.pack(fill="x", padx=10, pady=(6, 2))
+
+        btn_box = ttk.Frame(tab)
+        btn_box.pack(fill="x", padx=6, pady=4)
+        ttk.Button(
+            btn_box,
+            text="Open SFX Library...",
+            command=self.on_open_sfx_library,
+        ).pack(side="left")
+
+        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(3, weight=1)
+
     def _build_master_controls(self, parent):
         ctrl_frame = ttk.LabelFrame(parent, text="Pipeline Controls")
         ctrl_frame.pack(fill="x", padx=6, pady=(0, 6))
@@ -579,7 +660,7 @@ class App(tk.Tk):
         self.progress_lbl.pack(side="left", padx=(8, 0))
 
     def _build_steps_panel(self, parent):
-        steps_frame = ttk.LabelFrame(parent, text="Pipeline Workers (Steps 1–9)")
+        steps_frame = ttk.LabelFrame(parent, text=f"Pipeline Workers (Steps 1–{len(job_defs.JOBS)})")
         steps_frame.pack(fill="x", padx=6, pady=(0, 8))
 
         for job in job_defs.JOBS:
@@ -728,6 +809,46 @@ class App(tk.Tk):
         if chosen:
             self.image_source_var.set(chosen)
 
+    def on_pick_bg_color(self):
+        initial = self.bg_color_var.get().strip() or "#000000"
+        if not initial.startswith("#") and not initial.startswith("0x"):
+            initial = "#000000" if initial == "black" else initial
+        color = colorchooser.askcolor(title="Select Background Color", initialcolor=initial)
+        if color and color[1]:
+            self.bg_color_var.set(color[1])
+            self._update_color_swatch()
+
+    def _update_color_swatch(self, *args):
+        if not hasattr(self, "bg_swatch"):
+            return
+        val = self.bg_color_var.get().strip()
+        color = val
+        if val.startswith("0x"):
+            color = "#" + val[2:]
+        elif len(val) == 6 and all(c in "0123456789abcdefABCDEF" for c in val):
+            color = "#" + val
+        try:
+            self.bg_swatch.configure(bg=color)
+        except Exception:
+            pass
+
+    def on_browse_bg_image(self):
+        initial = str(Path.home())
+        if self.bg_image_var.get().strip():
+            p = Path(self.bg_image_var.get().strip()).parent
+            if p.is_dir():
+                initial = str(p)
+        chosen = filedialog.askopenfilename(
+            title="Select Background Image",
+            initialdir=initial,
+            filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.webp"), ("All files", "*.*")],
+        )
+        if chosen:
+            self.bg_image_var.set(chosen)
+
+    def on_clear_bg_image(self):
+        self.bg_image_var.set("")
+
     def _collect_params(self, require_title=False):
         """Read every GUI field into a params dict. Returns None (after a dialog) on invalid input."""
         def fail(message):
@@ -779,6 +900,21 @@ class App(tk.Tk):
         except ValueError:
             sub_font_size = 0
 
+        try:
+            sfx_vol = float(self.sfx_volume_var.get().strip() or 0.5)
+        except (ValueError, AttributeError):
+            sfx_vol = 0.5
+
+        try:
+            sfx_pop_vol = float(self.sfx_pop_volume_var.get().strip() or 0.4)
+        except (ValueError, AttributeError):
+            sfx_pop_vol = 0.4
+
+        try:
+            sfx_interval = float(self.sfx_min_interval_var.get().strip() or 3.0)
+        except (ValueError, AttributeError):
+            sfx_interval = 3.0
+
         duration_value = int(duration) if duration == int(duration) else duration
         return {
             "title": title,
@@ -795,6 +931,9 @@ class App(tk.Tk):
             "transition": self.transition_var.get() or "none",
             "smoothness": self.smoothness_var.get() or "ease_in_out",
             "fit": self.fit_var.get() or "cover",
+            "bg_color": self.bg_color_var.get().strip() or "black",
+            "bg_image": self.bg_image_var.get().strip(),
+            "prompt_bg_on_edit": bool(self.prompt_bg_on_edit_var.get()),
             "fps": fps,
             "zoom": zoom,
             "image_source": self.image_source_var.get().strip(),
@@ -806,6 +945,10 @@ class App(tk.Tk):
             "subtitle_uppercase": bool(self.subtitle_uppercase_var.get()),
             "subtitle_font": self.subtitle_font_var.get().strip(),
             "subtitle_font_size": sub_font_size,
+            "sfx_volume": sfx_vol,
+            "sfx_pop_volume": sfx_pop_vol,
+            "sfx_min_interval": sfx_interval,
+            "sfx_include_first_beat": bool(self.sfx_first_beat_var.get()),
             "use_gpu": bool(self.use_gpu_var.get()),
         }
 
@@ -834,6 +977,10 @@ class App(tk.Tk):
         self.transition_var.set(pick("transition", job_defs.TRANSITIONS, "none"))
         self.smoothness_var.set(pick("smoothness", job_defs.SMOOTHNESS, "ease_in_out"))
         self.fit_var.set(pick("fit", job_defs.FIT_MODES, "cover"))
+        self.bg_color_var.set(str(params.get("bg_color", "black") or "black"))
+        self.bg_image_var.set(str(params.get("bg_image", "") or ""))
+        self.prompt_bg_on_edit_var.set(bool(params.get("prompt_bg_on_edit", True)))
+        self._update_color_swatch()
         self.fps_var.set(str(params.get("fps", 30) or 30))
         self.zoom_var.set(str(params.get("zoom", 0.18) if params.get("zoom", None) not in (None, "") else 0.18))
         self.image_subfolder_var.set(bool(params.get("image_subfolder", False)))
@@ -846,6 +993,10 @@ class App(tk.Tk):
         self.subtitle_uppercase_var.set(bool(params.get("subtitle_uppercase", False)))
         self.subtitle_font_var.set(str(params.get("subtitle_font", "") or ""))
         self.subtitle_font_size_var.set(str(params.get("subtitle_font_size", 0) or 0))
+        self.sfx_volume_var.set(str(params.get("sfx_volume", 0.5) if params.get("sfx_volume") is not None else 0.5))
+        self.sfx_pop_volume_var.set(str(params.get("sfx_pop_volume", 0.4) if params.get("sfx_pop_volume") is not None else 0.4))
+        self.sfx_min_interval_var.set(str(params.get("sfx_min_interval", 3.0) if params.get("sfx_min_interval") is not None else 3.0))
+        self.sfx_first_beat_var.set(bool(params.get("sfx_include_first_beat", False)))
         self.use_gpu_var.set(bool(params.get("use_gpu", False)))
 
         self._on_subfolder_toggled()
@@ -960,8 +1111,135 @@ class App(tk.Tk):
             return
         if not self._sync_params_to_project():
             return
+        if job_id == "editor" and self.prompt_bg_on_edit_var.get():
+            if not self._prompt_background_dialog():
+                return
+            if not self._sync_params_to_project():
+                return
         self.engine.run_single(job_id)
         self._update_controls()
+
+    def _prompt_background_dialog(self) -> bool:
+        """Prompt user for background color or image before running Video Editor."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Video Background Setup")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+
+        confirmed = False
+
+        temp_color_var = tk.StringVar(value=self.bg_color_var.get().strip() or "black")
+        temp_image_var = tk.StringVar(value=self.bg_image_var.get().strip())
+        temp_dont_ask_var = tk.BooleanVar(value=not self.prompt_bg_on_edit_var.get())
+
+        header = ttk.Label(
+            dlg,
+            text="Choose background color or image for slide transitions & letterboxing.\n(Optional - default is black)",
+            justify="left",
+        )
+        header.pack(fill="x", padx=14, pady=(12, 8))
+
+        form = ttk.Frame(dlg)
+        form.pack(fill="x", padx=14, pady=4)
+
+        # Color row
+        ttk.Label(form, text="Background Color").grid(row=0, column=0, sticky="w", pady=4)
+        color_entry = ttk.Entry(form, textvariable=temp_color_var, width=14)
+        color_entry.grid(row=0, column=1, sticky="w", padx=(6, 4), pady=4)
+
+        color_swatch = tk.Canvas(form, width=22, height=22, relief="ridge", bd=1)
+        color_swatch.grid(row=0, column=2, padx=4, pady=4)
+
+        def update_dlg_swatch(*_):
+            c = temp_color_var.get().strip()
+            if c.startswith("0x"):
+                c = "#" + c[2:]
+            elif len(c) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in c):
+                c = "#" + c
+            try:
+                color_swatch.configure(bg=c)
+            except Exception:
+                pass
+
+        temp_color_var.trace_add("write", update_dlg_swatch)
+        update_dlg_swatch()
+
+        def pick_dlg_color():
+            init = temp_color_var.get().strip() or "#000000"
+            if not init.startswith("#") and not init.startswith("0x"):
+                init = "#000000" if init == "black" else init
+            chosen = colorchooser.askcolor(title="Select Background Color", initialcolor=init, parent=dlg)
+            if chosen and chosen[1]:
+                temp_color_var.set(chosen[1])
+
+        ttk.Button(form, text="Pick Color...", command=pick_dlg_color).grid(row=0, column=3, padx=4, pady=4)
+
+        # Image row
+        ttk.Label(form, text="Background Image").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(form, textvariable=temp_image_var, width=24).grid(row=1, column=1, columnspan=2, sticky="we", padx=(6, 4), pady=4)
+
+        def browse_dlg_img():
+            init = str(Path.home())
+            if temp_image_var.get().strip():
+                p = Path(temp_image_var.get().strip()).parent
+                if p.is_dir():
+                    init = str(p)
+            chosen = filedialog.askopenfilename(
+                parent=dlg,
+                title="Select Background Image",
+                initialdir=init,
+                filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.webp"), ("All files", "*.*")],
+            )
+            if chosen:
+                temp_image_var.set(chosen)
+
+        btn_box = ttk.Frame(form)
+        btn_box.grid(row=1, column=3, sticky="w", padx=4, pady=4)
+        ttk.Button(btn_box, text="Browse...", command=browse_dlg_img).pack(side="left")
+        ttk.Button(btn_box, text="Clear", command=lambda: temp_image_var.set("")).pack(side="left", padx=(4, 0))
+
+        # Checkbox
+        ttk.Checkbutton(
+            dlg,
+            text="Don't ask again (use Video & Animation tab values)",
+            variable=temp_dont_ask_var,
+        ).pack(anchor="w", padx=14, pady=(6, 12))
+
+        # Buttons
+        btn_bar = ttk.Frame(dlg)
+        btn_bar.pack(fill="x", padx=14, pady=(0, 12))
+
+        def on_continue():
+            nonlocal confirmed
+            confirmed = True
+            dlg.destroy()
+
+        def on_cancel():
+            dlg.destroy()
+
+        continue_btn = ttk.Button(btn_bar, text="▶ Continue & Render", command=on_continue)
+        continue_btn.pack(side="right", padx=(4, 0))
+        ttk.Button(btn_bar, text="Cancel", command=on_cancel).pack(side="right")
+
+        dlg.protocol("WM_DELETE_WINDOW", on_cancel)
+
+        # Center on parent
+        dlg.update_idletasks()
+        rx, ry = self.root.winfo_x(), self.root.winfo_y()
+        rw, rh = self.root.winfo_width(), self.root.winfo_height()
+        dw, dh = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+        dlg.geometry(f"+{max(0, rx + (rw - dw) // 2)}+{max(0, ry + (rh - dh) // 2)}")
+
+        dlg.grab_set()
+        self.root.wait_window(dlg)
+
+        if confirmed:
+            self.bg_color_var.set(temp_color_var.get().strip() or "black")
+            self.bg_image_var.set(temp_image_var.get().strip())
+            self.prompt_bg_on_edit_var.set(not temp_dont_ask_var.get())
+            self._update_color_swatch()
+            return True
+        return False
 
     def on_reset_step(self, job_id):
         if not self._require_project() or self.engine.running:
@@ -975,12 +1253,18 @@ class App(tk.Tk):
         if not open_path(self.engine.state.project_dir):
             messagebox.showinfo("Project folder", str(self.engine.state.project_dir))
 
+    def on_open_sfx_library(self):
+        lib_dir = self.engine.pipeline_root / "sfx-adder" / "library"
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        if not open_path(lib_dir):
+            messagebox.showinfo("SFX Library", str(lib_dir))
+
     def on_open_final(self):
         if not self._require_project():
             return
         final = self.engine.final_video_path()
         if final is None or not final.exists():
-            messagebox.showinfo("Not yet", f"final.mp4 doesn't exist yet - run the pipeline through step {len(job_defs.JOBS)} first.")
+            messagebox.showinfo("Not yet", f"No rendered video found yet - run the pipeline through step {len(job_defs.JOBS)} first.")
             return
         if not open_path(final):
             messagebox.showinfo("Final video", str(final))
