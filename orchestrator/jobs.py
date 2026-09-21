@@ -47,6 +47,7 @@ DEPTHS = ["light", "balanced", "deep"]
 SUBTITLE_STYLES = [
     "hormozi",
     "classic",
+    "yellow_classic",
     "modern",
     "karaoke",
     "neon",
@@ -560,12 +561,15 @@ def build_subtitle_burn_cmd(ctx, settings):
     paths = project_paths(ctx)
     # Prefer video with sound effects if present, otherwise fall back to final.mp4
     input_video = paths["final_sfx"] if paths["final_sfx"].exists() else paths["final"]
+    raw_style = str(ctx.get("subtitle_style") or "").strip().lower()
+    if raw_style in ("classic_yellow", "yellow classic", "classic yellow", "yello_classic", "yello classic"):
+        raw_style = "yellow_classic"
     cmd = [
         _python(settings), "subtitle_worker.py",
         "--video", str(input_video),
         "--srt", str(paths["srt"]),
         "--out", str(paths["subtitled"]),
-        "--style", _pick(ctx.get("subtitle_style"), SUBTITLE_STYLES, "hormozi"),
+        "--style", _pick(raw_style, SUBTITLE_STYLES, "hormozi"),
         "--animation", _pick(ctx.get("subtitle_animation"), SUBTITLE_ANIMATIONS, "pop"),
         "--position", _pick(ctx.get("subtitle_position"), SUBTITLE_POSITIONS, "bottom"),
         "--max-words", str(max(0, _number(ctx.get("subtitle_max_words"), 3, int))),

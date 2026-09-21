@@ -127,7 +127,7 @@ flag; written atomically, corrupted files are backed up), `pipeline.log`
 - `enhancer.py in.mp3 --output out.mp3 --preset youtube --target-lufs -16
   --true-peak -1.5 --lra 7 --no-deesser` (`--list-presets` prints the presets)
 - `subtitle_worker.py --video final.mp4 --srt sub.srt --out final_subtitled.mp4 --style hormozi --animation pop --max-words 3`
-  (`--list-styles` lists presets: hormozi, karaoke, modern, neon, cinematic, boxed, comic)
+  (`--list-styles` lists presets: hormozi, classic, yellow_classic, karaoke, modern, neon, cinematic, boxed, comic)
 
 ## 7. Customizing / extending
 

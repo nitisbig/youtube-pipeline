@@ -59,6 +59,7 @@ except ImportError:
 STYLES = [
     "hormozi",
     "classic",
+    "yellow_classic",
     "modern",
     "karaoke",
     "neon",
@@ -83,6 +84,7 @@ POSITIONS = ["bottom", "middle", "top"]
 STYLE_HELP = {
     "hormozi": "Bold uppercase yellow text (#FFDE00), thick black outline, punchy drop shadow (viral Shorts/Reels style).",
     "classic": "Clean white text (#FFFFFF), subtle black outline, soft translucent drop shadow (standard YouTube style).",
+    "yellow_classic": "Classic yellow text (#FFE800) in clean sans-serif (Liberation Sans/Arial), subtle black outline, soft translucent drop shadow (iconic cinema / retro film / anime subtitle aesthetic).",
     "modern": "Sleek sans-serif white text over a semi-transparent dark rounded/pill background box.",
     "karaoke": "Word-by-word active highlight (current word pops in vibrant cyan/gold while phrase stays readable).",
     "neon": "Cyberpunk vibrant cyan text with glowing neon colored halo/blur and bright outline.",
@@ -333,11 +335,24 @@ def build_ass_content(
     outline_color_override: str = "",
     outline_width_override: int = -1,
     margin_v_override: int = -1,
+    italic: bool = False,
 ) -> str:
     """Generate complete ASS subtitle file content based on style and animation presets."""
 
     is_vertical = video_height > video_width
     scale_factor = video_height / 1080.0
+
+    # If font_name is given as a yellow_classic style alias, route to yellow_classic style
+    if font_name and font_name.strip().lower() in (
+        "yellow_classic",
+        "yellow classic",
+        "classic_yellow",
+        "classic yellow",
+        "yello_classic",
+        "yello classic",
+    ):
+        style = "yellow_classic"
+        font_name = ""
 
     # Auto-detect Devanagari to choose correct font if not manually specified
     has_devanagari = any(contains_devanagari(chunk.full_text) for chunk in chunks)
@@ -369,7 +384,7 @@ def build_ass_content(
     # Default base values for 1080p
     base_font_size = 52
     bold = -1  # ASS -1 is true, 0 is false
-    italic = 0
+    italic_code = -1 if italic else 0
     border_style = 1  # 1 = outline + shadow, 3 = opaque box
     outline = 4
     shadow = 2
@@ -400,6 +415,16 @@ def build_ass_content(
         shadow = 2
         back_alpha = 150
         highlight_hex = "#FFFF00"
+    elif style in ("yellow_classic", "classic_yellow", "yello_classic"):
+        base_font_size = 46
+        if not font_name or font_name == "DejaVu Sans":
+            font_name = "Liberation Sans"
+        primary_hex = "#FFE800"  # Iconic cinema / anime yellow
+        outline_hex = "#000000"
+        outline = 2.5
+        shadow = 2
+        back_alpha = 150
+        highlight_hex = "#FFFFFF"
     elif style == "modern":
         base_font_size = 48
         primary_hex = "#FFFFFF"
@@ -495,7 +520,7 @@ def build_ass_content(
         ),
         (
             f"Style: Default,{font_name},{calculated_font_size},{primary_ass},{secondary_ass},{outline_ass},"
-            f"{back_ass},{bold},{italic},0,0,100,100,{spacing},0,{border_style},{calculated_outline},"
+            f"{back_ass},{bold},{italic_code},0,0,100,100,{spacing},0,{border_style},{calculated_outline},"
             f"{calculated_shadow},{alignment},{margin_lr},{margin_lr},{margin_v},1"
         ),
         "",
@@ -583,6 +608,7 @@ def burn_subtitles(
     position: str = "bottom",
     max_words: int = 3,
     uppercase: bool = False,
+    italic: bool = False,
     font_name: str = "",
     font_size: int = 0,
     dry_run: bool = False,
@@ -602,6 +628,10 @@ def burn_subtitles(
     check_tool("ffmpeg")
     check_tool("ffprobe")
 
+    # Normalize style aliases
+    if style in ("classic_yellow", "yello_classic", "yellow classic", "classic yellow"):
+        style = "yellow_classic"
+
     print(f"Reading subtitles: {srt}")
     try:
         srt_text = srt.read_text(encoding="utf-8")
@@ -620,6 +650,7 @@ def burn_subtitles(
     print(f"Preset style     : {style} ({STYLE_HELP.get(style, '')})")
     print(f"Animation        : {animation} ({ANIMATION_HELP.get(animation, '')})")
     print(f"Position         : {position}")
+    print(f"Italic           : {italic}")
     print(f"Max words/chunk  : {max_words if max_words > 0 else 'no chunking'}")
     print(f"GPU acceleration : {use_gpu}")
 
@@ -635,6 +666,7 @@ def burn_subtitles(
         position=position,
         font_name=font_name,
         font_size=font_size,
+        italic=italic,
     )
 
     # Write ASS file next to the output video or in the project folder
@@ -738,7 +770,7 @@ def main() -> None:
 
     parser.add_argument(
         "--style",
-        choices=STYLES,
+        choices=STYLES + ["classic_yellow", "yello_classic"],
         default="hormozi",
         help="Subtitle style preset (default: hormozi). Use --list-styles to see all descriptions.",
     )
@@ -765,6 +797,12 @@ def main() -> None:
         action="store_true",
         default=False,
         help="Force all subtitle text to uppercase.",
+    )
+    parser.add_argument(
+        "--italic",
+        action="store_true",
+        default=False,
+        help="Render subtitles in italic (classic cinema/anime subtitle aesthetic).",
     )
     parser.add_argument(
         "--font",
@@ -813,11 +851,11 @@ def main() -> None:
         print("\n=== Subtitle Styles ===")
         for s in STYLES:
             desc = STYLE_HELP.get(s, "")
-            print(f"  {s:<12} : {desc}")
+            print(f"  {s:<14} : {desc}")
         print("\n=== Subtitle Animations ===")
         for a in ANIMATIONS:
             desc = ANIMATION_HELP.get(a, "")
-            print(f"  {a:<12} : {desc}")
+            print(f"  {a:<14} : {desc}")
         return
 
     if not args.video or not args.srt or not args.out:
@@ -833,6 +871,7 @@ def main() -> None:
         position=args.position,
         max_words=args.max_words,
         uppercase=args.uppercase,
+        italic=args.italic,
         font_name=args.font,
         font_size=args.font_size,
         dry_run=args.dry_run,
